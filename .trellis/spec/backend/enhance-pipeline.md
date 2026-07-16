@@ -34,7 +34,6 @@
   - `save_enhance_tile(output_prefix, row, col, content, suffix)`
   - `save_enhance_final(output_prefix, content, suffix)`
   - `save_enhance_input_blob(blob_id, content, suffix)`
-  - `delete_enhance_artifacts(job_or_run_id)`
 
 ### 3. Contracts
 
@@ -56,7 +55,8 @@
 - `ctx.quality_prompt` must be preserved in provider prompts where the strategy supports prompt customization. Direct uses
   `ctx.quality_prompt or DEFAULT_ENHANCE_PROMPT`; Tiled appends the custom instruction to the tile prompt.
 - Actor cancellation is checked before each provider call and again after strategy return but before marking success, using
-  a refreshed DB row. Cancelled jobs clean `enhance/{job_id}` artifacts and must not be released as successful work.
+  a refreshed DB row. Cancelled jobs settle durable state without publishing result references and must not be released as
+  successful work. Already-written objects remain unreferenced for storage lifecycle cleanup.
 - `EnhanceJobInput` is internal-only. Do not add a user temporary upload API for C1.
 
 ### 4. Validation & Error Matrix
@@ -76,8 +76,8 @@
 
 - Good: a 200x200 source with tiled `scale=4`, `tile_base_size=512`, and `image_generation_max_dimension=512` produces an
   800x800 final target, four provider calls, `final_status="pending_upload"`, then accepts an 800x800 final upload.
-- Good: a cancelled job whose strategy already wrote final or tile files is observed after strategy return and cleans the
-  entire `enhance/{job_id}` artifact tree.
+- Good: a cancelled job whose strategy already wrote final or tile files is observed after strategy return, settles as
+  cancelled without a result manifest, and leaves unreferenced objects to the configured lifecycle policy.
 - Base: Direct generation returns a ready final immediately and can be saved to the resource library without `POST /final`.
 - Bad: rejecting a tiled final only because it is larger than `image_generation_max_dimension`.
 - Bad: treating `status=succeeded` as sufficient for tiled resource-library save when `final_image_ref` is still empty.
@@ -93,8 +93,9 @@
   - Direct lifecycle and resource-library save.
   - Tiled final above provider max dimension, pending/ready final status, final upload idempotency, and save-to-library.
   - Capacity requeue.
-  - Cross-session cancellation before tile calls and after strategy return, with storage cleanup.
-  - Input cleanup keeps referenced snapshots and deletes old unreferenced snapshots.
+  - Cross-session cancellation before tile calls and after strategy return, without object delete calls.
+  - Input cleanup removes expired unreferenced database snapshots, keeps referenced rows, and leaves stored objects for
+    lifecycle cleanup.
 - API tests:
   - Same-origin tile/final URLs.
   - Tiled final upload over provider max dimension.

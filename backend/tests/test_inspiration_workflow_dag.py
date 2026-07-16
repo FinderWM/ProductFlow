@@ -6,6 +6,7 @@ import pytest
 import sqlalchemy as sa
 from fastapi.testclient import TestClient
 from helpers import (
+    _enable_text_generation_configs_image_understanding,
     _execute_workflow_queue_inline,
     _login,
     _make_demo_image_bytes,
@@ -57,6 +58,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     add_generation_config,
     add_generation_resource_group,
 )
+from inspiration_one_backend.infrastructure.provider_config_constants import TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY
 
 _WORKFLOW_NODE_VISUAL_WIDTH = 248
 _WORKFLOW_NODE_VISUAL_HEIGHT = 248
@@ -105,6 +107,16 @@ def _execute_workflow_queue_inline_fixture(monkeypatch: pytest.MonkeyPatch) -> N
     """Keep API workflow tests deterministic while production delivery goes through Dramatiq."""
 
     _execute_workflow_queue_inline(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _enable_text_generation_configs_image_understanding_fixture(configured_env: Path) -> None:
+    del configured_env
+    session = get_session_factory()()
+    try:
+        _enable_text_generation_configs_image_understanding(session)
+    finally:
+        session.close()
 
 
 def test_inspiration_workflow_dag_runs_and_persists_artifacts(configured_env: Path) -> None:
@@ -269,7 +281,7 @@ def test_inspiration_workflow_dag_runs_and_persists_artifacts(configured_env: Pa
     assert copy_output["structured_payload"]["version"] == 2
     assert not set(REMOVED_COPY_OUTPUT_KEYS) & set(copy_output)
     assert "免打孔" in str(copy_output["structured_payload"])
-    assert "厨房风格图" in str(copy_output["structured_payload"])
+    assert "灵感主图" in str(copy_output["structured_payload"])
     edited_copy = client.patch(
         f"/api/workflow-nodes/{copy_node['id']}/copy",
         json={
@@ -413,7 +425,7 @@ def test_workflow_success_updates_inspiration_resource_group(configured_env: Pat
         provider_kind="mock",
         provider_profile_id=None,
         model_settings={"brief_model": "mock-brief", "copy_model": "mock-copy"},
-        config={},
+        config={TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY: True},
         priority=200,
     )
     add_generation_config(
@@ -1003,7 +1015,7 @@ def test_builtin_scenario_template_runs_with_auto_inspiration_context_edges(
     assert provider_input.source_note == "验证场景模板会自动继承灵感产物资料和灵感产物主图。"
     assert provider_input.source_image is not None
     assert len(provider_input.reference_images) == 1
-    assert provider_input.reference_images[0].path == provider_input.source_image
+    assert provider_input.reference_images[0].source_key == provider_input.source_image.source_key
 
 
 def test_apply_builtin_scenario_template_avoids_existing_node_overlap(configured_env: Path) -> None:
@@ -2194,7 +2206,8 @@ def test_inspiration_context_source_image_reaches_image_generation_context(
         "input_fidelity": "high",
     }
     assert len(provider_input.reference_images) == 1
-    assert provider_input.reference_images[0].path == provider_input.source_image
+    assert provider_input.source_image is not None
+    assert provider_input.reference_images[0].source_key == provider_input.source_image.source_key
 
 
 def test_image_generation_collects_inspiration_context_through_upstream_copy_edge(
@@ -2321,7 +2334,7 @@ def test_image_generation_collects_inspiration_context_through_upstream_copy_edg
     assert "折叠露营椅" in provider_input.structured_copy_context
     assert provider_input.source_image is not None
     assert len(provider_input.reference_images) == 1
-    assert provider_input.reference_images[0].path == provider_input.source_image
+    assert provider_input.reference_images[0].source_key == provider_input.source_image.source_key
 
 
 def test_single_node_workflow_run_reuses_succeeded_upstream_outputs(configured_env: Path) -> None:
@@ -2770,7 +2783,7 @@ def test_copy_generation_runs_without_inspiration_context_edge(
     assert captured_inspiration.category is None
     assert captured_inspiration.price is None
     assert captured_inspiration.source_note is None
-    assert captured_inspiration.image_path == ""
+    assert captured_inspiration.source_image is None
     _assert_inspiration_context_subset(
         copy_output["context_summary"]["inspiration_context"],
         {

@@ -8,6 +8,7 @@ import pytest
 import sqlalchemy as sa
 from fastapi.testclient import TestClient
 from helpers import (
+    _enable_text_generation_configs_image_understanding,
     _execute_workflow_queue_inline,
     _login,
     _make_demo_image_bytes,
@@ -1055,6 +1056,7 @@ def test_workflow_image_generation_timeout_marks_run_node_and_queue_failed(
     from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
     from inspiration_one_backend.application.inspiration_workflows import run_inspiration_workflow
 
+    _enable_text_generation_configs_image_understanding(db_session)
     db_session.add(AppSetting(key="poster_generation_mode", value="generated"))
     db_session.commit()
     monkeypatch.setattr(
@@ -1126,6 +1128,7 @@ def test_workflow_image_generation_provider_failure_uses_safe_reason(
     from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
     from inspiration_one_backend.application.inspiration_workflows import run_inspiration_workflow
 
+    _enable_text_generation_configs_image_understanding(db_session)
     db_session.add(AppSetting(key="poster_generation_mode", value="generated"))
     db_session.commit()
 
@@ -1180,6 +1183,7 @@ def test_workflow_image_generation_provider_failure_exposes_safe_detail(
     from inspiration_one_backend.application.inspiration_workflows import run_inspiration_workflow
     from inspiration_one_backend.presentation.schemas.inspiration_workflows import serialize_inspiration_workflow
 
+    _enable_text_generation_configs_image_understanding(db_session)
     db_session.add(AppSetting(key="poster_generation_mode", value="generated"))
     db_session.commit()
 
@@ -1239,6 +1243,7 @@ def test_workflow_image_generation_provider_failure_categorizes_wrapped_rate_lim
     from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
     from inspiration_one_backend.application.inspiration_workflows import run_inspiration_workflow
 
+    _enable_text_generation_configs_image_understanding(db_session)
     db_session.add(AppSetting(key="poster_generation_mode", value="generated"))
     db_session.commit()
 
@@ -1284,6 +1289,7 @@ def test_workflow_image_generation_policy_reject_is_not_retryable(
     from inspiration_one_backend.domain.errors import BusinessValidationError
     from inspiration_one_backend.presentation.schemas.inspiration_workflows import serialize_inspiration_workflow
 
+    _enable_text_generation_configs_image_understanding(db_session)
     db_session.add(AppSetting(key="poster_generation_mode", value="generated"))
     db_session.commit()
 

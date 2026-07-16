@@ -79,6 +79,7 @@ def claim_runtime_generation_config(
     *,
     purpose: Literal["text", "image"],
     selection: GenerationConfigSelection | None = None,
+    require_image_understanding: bool = False,
     session: Session | None = None,
 ) -> RuntimeGenerationConfigClaim:
     if purpose not in {TEXT_PURPOSE, IMAGE_PURPOSE}:
@@ -93,6 +94,7 @@ def claim_runtime_generation_config(
             resource_group_id=resolved_selection.resource_group_id,
             generation_config_id=generation_config_id_for_claim(resolved_selection),
             required_max_dimension=resolved_selection.required_max_dimension,
+            require_image_understanding=require_image_understanding,
         )
         if claim is None:
             if owns_session:

@@ -5,14 +5,13 @@ from base64 import b64encode
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from openai import OpenAI
 
-from inspiration_one_backend.application.contracts import PosterGenerationInput
+from inspiration_one_backend.application.contracts import PosterGenerationInput, reference_image_identity
 from inspiration_one_backend.config import (
     IMAGE_TOOL_FIELD_KEYS,
     filter_image_tool_options,
@@ -120,16 +119,6 @@ def _sanitize_base64_images(item: Any) -> Any:
         return sanitized
     return item
 
-
-def _mime_type_for_path(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix in {".jpg", ".jpeg"}:
-        return "image/jpeg"
-    if suffix == ".webp":
-        return "image/webp"
-    return "image/png"
-
-
 def decode_reference_data_url(data_url: str) -> ResponsesReferenceImage:
     if not data_url.startswith("data:") or ";base64," not in data_url:
         raise RuntimeError("对话中的参考图不是合法 data URL")
@@ -150,28 +139,23 @@ def build_responses_reference_images_from_poster(poster: PosterGenerationInput) 
     references: list[ResponsesReferenceImage] = []
     seen_keys: set[str] = set()
 
-    def add_path(path: Path, *, mime_type: str, filename: str | None = None) -> None:
-        resolved = path.resolve()
-        key = str(resolved)
+    def add_reference(reference) -> None:
+        key = reference_image_identity(reference)
         if key in seen_keys:
             return
         seen_keys.add(key)
         references.append(
             ResponsesReferenceImage(
-                bytes_data=resolved.read_bytes(),
-                mime_type=mime_type,
-                filename=filename or resolved.name,
+                bytes_data=reference.bytes_data,
+                mime_type=reference.mime_type,
+                filename=reference.filename,
             )
         )
 
     if poster.source_image is not None:
-        add_path(
-            poster.source_image,
-            mime_type=_mime_type_for_path(poster.source_image),
-            filename=poster.source_image.name,
-        )
+        add_reference(poster.source_image)
     for reference in poster.reference_images:
-        add_path(reference.path, mime_type=reference.mime_type, filename=reference.filename)
+        add_reference(reference)
     return references
 
 
@@ -831,10 +815,7 @@ class OpenAIResponsesImageProvider(ImageProvider):
                 f"{poster.structured_copy_context}"
             )
         if poster.reference_images or poster.source_image is not None:
-            reference_paths = {str(reference.path.resolve()) for reference in poster.reference_images}
-            if poster.source_image is not None:
-                reference_paths.add(str(poster.source_image.resolve()))
-            reference_count = len(reference_paths)
+            reference_count = len(build_responses_reference_images_from_poster(poster))
             lines.append(f"- 参考图片数量：{reference_count}")
             if poster.source_image is not None:
                 lines.append("- 灵感产物原图：第 1 张输入图片")

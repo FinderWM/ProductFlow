@@ -194,7 +194,7 @@ def test_enhance_deck_slide_material_marks_enhanced(db_session):
     storage = LocalStorage()
     buffer = BytesIO()
     Image.new("RGB", (64, 64), (200, 180, 160)).save(buffer, format="PNG")
-    relative = storage.save_deck_slide_material(deck.id, 0, buffer.getvalue())
+    relative = storage.save_deck_slide_material(deck.id, 0, buffer.getvalue(), content_type="image/png")
     meta = storage.metadata_for(relative).as_model_kwargs()
     slide = DeckSlide(
         deck_id=deck.id,

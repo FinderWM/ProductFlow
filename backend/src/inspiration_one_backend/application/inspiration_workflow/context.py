@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import re
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -50,6 +49,7 @@ INSPIRATION_CONTEXT_TEXT_KEYS = (
     "document_mime_type",
     "document_text",
 )
+REFERENCE_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 
 
 def find_source_asset(inspiration: Inspiration) -> SourceAsset | None:
@@ -590,11 +590,12 @@ def reference_image_inputs_for_copy(
             seen_asset_ids.add(asset.id)
             inputs.append(
                 ReferenceImageInput(
-                    path=Path(storage.resolve(storage.object_key_for(asset))),
+                    bytes_data=storage.read_bytes(storage.object_key_for(asset), max_bytes=REFERENCE_IMAGE_MAX_BYTES),
                     mime_type=asset.mime_type,
                     filename=asset.original_filename,
                     role=role,
                     label=label,
+                    source_key=storage.object_key_for(asset),
                 )
             )
     incoming_asset_ids = incoming_context.image_asset_ids if incoming_context is not None else []
@@ -617,11 +618,12 @@ def reference_image_inputs_for_copy(
             seen_asset_ids.add(asset.id)
             inputs.append(
                 ReferenceImageInput(
-                    path=Path(storage.resolve(storage.object_key_for(asset))),
+                    bytes_data=storage.read_bytes(storage.object_key_for(asset), max_bytes=REFERENCE_IMAGE_MAX_BYTES),
                     mime_type=asset.mime_type,
                     filename=asset.original_filename,
                     role="context",
                     label=asset.original_filename,
+                    source_key=storage.object_key_for(asset),
                 )
             )
     return inputs
@@ -651,11 +653,12 @@ def reference_image_inputs_for_tail(
             continue
         inputs.append(
             ReferenceImageInput(
-                path=Path(storage.resolve(storage.object_key_for(asset))),
+                bytes_data=storage.read_bytes(storage.object_key_for(asset), max_bytes=REFERENCE_IMAGE_MAX_BYTES),
                 mime_type=asset.mime_type,
                 filename=asset.original_filename,
                 role="reference",
                 label=asset.original_filename,
+                source_key=storage.object_key_for(asset),
             )
         )
     return inputs

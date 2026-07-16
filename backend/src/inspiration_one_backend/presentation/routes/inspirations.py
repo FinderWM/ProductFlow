@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -24,9 +24,8 @@ from inspiration_one_backend.application.use_cases import (
 from inspiration_one_backend.domain.enums import InspirationWorkflowState
 from inspiration_one_backend.domain.rbac import API_INSPIRATIONS_READ, API_INSPIRATIONS_WRITE
 from inspiration_one_backend.infrastructure.db.models import AuthUser, PosterVariant, SourceAsset
-from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage
+from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage, StorageError
 from inspiration_one_backend.presentation.deps import get_session, require_api_permission, require_deletion_enabled
-from inspiration_one_backend.presentation.image_variants import build_variant_filename
 from inspiration_one_backend.presentation.schemas.inspirations import (
     CopySetResponse,
     CopySetUpdateRequest,
@@ -38,6 +37,7 @@ from inspiration_one_backend.presentation.schemas.inspirations import (
     serialize_inspiration_summary,
     serialize_poster_variant,
 )
+from inspiration_one_backend.presentation.storage_responses import image_storage_object, raise_storage_response_error
 from inspiration_one_backend.presentation.upload_validation import (
     read_validated_image_upload,
     read_validated_text_document_upload,
@@ -256,6 +256,7 @@ def confirm_copy_set_endpoint(
 @router.get("/posters/{poster_id}/download")
 def download_poster_endpoint(
     poster_id: str,
+    request: Request,
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
@@ -267,26 +268,24 @@ def download_poster_endpoint(
         raise HTTPException(status_code=404, detail="海报不存在")
     ensure_resource_usable(poster)
     storage = LocalStorage()
-    object_key = storage.object_key_for(poster)
     try:
-        path, media_type = storage.resolve_for_variant(
+        object_key = storage.object_key_for(poster)
+        return image_storage_object(
+            storage,
             object_key,
-            variant,
+            variant=variant,
+            range_header=request.headers.get("range"),
+            filename=f"{poster.kind.value}{Path(object_key).suffix or '.png'}",
             fallback_media_type=poster.mime_type,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="海报文件不存在") from exc
-    filename = build_variant_filename(
-        f"{poster.kind.value}{Path(object_key).suffix or '.png'}",
-        variant=variant,
-        resolved_suffix=path.suffix,
-    )
-    return FileResponse(path, media_type=media_type, filename=filename)
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="海报文件不存在")
 
 
 @router.get("/source-assets/{asset_id}/download")
 def download_source_asset_endpoint(
     asset_id: str,
+    request: Request,
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_INSPIRATIONS_READ)),
@@ -298,17 +297,18 @@ def download_source_asset_endpoint(
         raise HTTPException(status_code=404, detail="源图不存在")
     ensure_resource_usable(asset)
     storage = LocalStorage()
-    object_key = storage.object_key_for(asset)
     try:
-        path, media_type = storage.resolve_for_variant(
+        object_key = storage.object_key_for(asset)
+        return image_storage_object(
+            storage,
             object_key,
-            variant,
+            variant=variant,
+            range_header=request.headers.get("range"),
+            filename=asset.original_filename,
             fallback_media_type=asset.mime_type,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="源图文件不存在") from exc
-    filename = build_variant_filename(asset.original_filename, variant=variant, resolved_suffix=path.suffix)
-    return FileResponse(path, media_type=media_type, filename=filename)
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="源图文件不存在")
 
 
 @router.delete("/source-assets/{asset_id}", response_model=InspirationDetailResponse)

@@ -623,7 +623,7 @@ def test_image_generation_config(
         relative_path = storage.save_image_session_generated(
             image_session.id,
             result.bytes_data,
-            suffix=infer_extension(result.mime_type),
+            content_type=result.mime_type,
         )
         asset = ImageSessionAsset(
             owner_user_id=image_session.owner_user_id,
@@ -836,7 +836,11 @@ def add_image_session_reference_images(
     ensure_resource_usable(image_session)
     storage = storage or LocalStorage()
     for content, filename, mime_type in reference_image_uploads:
-        relative_path = storage.save_image_session_reference(image_session.id, filename, content)
+        relative_path = storage.save_image_session_reference(
+            image_session.id,
+            content,
+            content_type=mime_type,
+        )
         storage_metadata = storage.metadata_for(relative_path)
         session.add(
             ImageSessionAsset(
@@ -1129,7 +1133,7 @@ def _execute_image_session_round_generation(
             relative_path = storage.save_image_session_generated(
                 image_session.id,
                 result.bytes_data,
-                suffix=infer_extension(result.mime_type),
+                content_type=result.mime_type,
             )
             _raise_if_image_generation_task_cancelled(session, generation_task_id)
             asset = ImageSessionAsset(
@@ -2268,10 +2272,14 @@ def attach_image_session_asset_to_inspiration(
         raise BusinessValidationError("只能写回同一账号下的灵感产物")
 
     storage = storage or LocalStorage()
-    image_bytes = storage.resolve(storage.object_key_for(asset)).read_bytes()
+    source_object_key = storage.object_key_for(asset)
 
     if target == "reference":
-        relative_path = storage.save_reference_upload(inspiration.id, asset.original_filename, image_bytes)
+        relative_path = storage.copy_to_reference_upload(
+            source_object_key,
+            inspiration.id,
+            content_type=asset.mime_type,
+        )
         storage_metadata = storage.metadata_for(relative_path)
         session.add(
             SourceAsset(
@@ -2286,7 +2294,11 @@ def attach_image_session_asset_to_inspiration(
         for current_source in _get_inspiration_original_assets(inspiration):
             current_source.kind = SourceAssetKind.REFERENCE_IMAGE
         session.flush()
-        relative_path = storage.save_inspiration_upload(inspiration.id, asset.original_filename, image_bytes)
+        relative_path = storage.copy_to_inspiration_upload(
+            source_object_key,
+            inspiration.id,
+            content_type=asset.mime_type,
+        )
         storage_metadata = storage.metadata_for(relative_path)
         session.add(
             SourceAsset(

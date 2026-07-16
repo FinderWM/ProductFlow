@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import random
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.moderation import resource_moderation_state
@@ -17,10 +16,10 @@ from inspiration_one_backend.config import (
 )
 from inspiration_one_backend.domain.enums import ResourceLibraryAssetKind
 from inspiration_one_backend.infrastructure.db.models import ResourceLibraryAsset
-from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage
+from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage, StorageError
 from inspiration_one_backend.presentation.deps import get_session
-from inspiration_one_backend.presentation.image_variants import build_variant_filename
 from inspiration_one_backend.presentation.schemas.public import LoginPageConfigResponse
+from inspiration_one_backend.presentation.storage_responses import image_storage_object, raise_storage_response_error
 
 router = APIRouter(prefix="/api/public", tags=["public"])
 
@@ -59,6 +58,7 @@ def _build_login_page_config(template_id: str, *, session: Session) -> LoginPage
 def download_login_page_asset_endpoint(
     template_id: str,
     slot: str,
+    request: Request,
     variant: ImageVariantName = Query(default="preview"),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -71,17 +71,18 @@ def download_login_page_asset_endpoint(
         raise HTTPException(status_code=404, detail="登录页资源不存在")
 
     storage = LocalStorage()
-    object_key = storage.object_key_for(asset)
     try:
-        path, media_type = storage.resolve_for_variant(
+        object_key = storage.object_key_for(asset)
+        return image_storage_object(
+            storage,
             object_key,
-            variant,
+            variant=variant,
+            range_header=request.headers.get("range"),
+            filename=asset.original_filename,
             fallback_media_type=asset.mime_type,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="登录页资源文件不存在") from exc
-    filename = build_variant_filename(asset.original_filename, variant=variant, resolved_suffix=path.suffix)
-    return FileResponse(path, media_type=media_type, filename=filename)
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="登录页资源文件不存在")
 
 
 def _resolve_login_page_template_id() -> str:

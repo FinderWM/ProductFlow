@@ -72,6 +72,7 @@ logger = logging.getLogger(__name__)
 
 WORKFLOW_IMAGE_GENERATION_FAILURE = "图片生成失败，请稍后重试"
 WORKFLOW_IMAGE_GENERATION_TIMEOUT_FAILURE = "图片生成超时，请稍后重试"
+WORKFLOW_REFERENCE_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 TAIL_SPLIT_PROMPT_SOURCE_LIMITS = {
     "public": (4, 1600),
     "manual": (6, 1400),
@@ -453,7 +454,8 @@ def execute_workflow_image_generation(
         )
         reference_payload = build_stored_image_reference_payload(
             reference_assets,
-            resolve_storage_path=storage.resolve,
+            storage=storage,
+            max_bytes=WORKFLOW_REFERENCE_IMAGE_MAX_BYTES,
         )
         instruction = _tail_split_image_instruction(
             workflow=workflow,
@@ -517,7 +519,7 @@ def execute_workflow_image_generation(
                 inspiration.id,
                 f"workflow-{kind.value}-{generated_image.target_index}",
                 content,
-                suffix=infer_extension(mime_type),
+                content_type=mime_type,
             )
             poster = PosterVariant(
                 inspiration_id=inspiration.id,
@@ -535,7 +537,11 @@ def execute_workflow_image_generation(
             poster_ids.append(poster.id)
 
             filename = f"reference-{generated_image.target_index}{infer_extension(mime_type)}"
-            reference_path = storage.save_reference_upload(inspiration.id, filename, content)
+            reference_path = storage.save_reference_upload(
+                inspiration.id,
+                content,
+                content_type=mime_type,
+            )
             storage_metadata = storage.metadata_for(reference_path)
             asset = SourceAsset(
                 inspiration_id=inspiration.id,

@@ -8,6 +8,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from inspiration_one_backend.application.enhance.limits import ENHANCE_FINAL_MAX_UPLOAD_BYTES
 from inspiration_one_backend.application.image_to_code.execution import (
     ImageToCodeBuildBundle,
     ImageToCodeJobParams,
@@ -28,7 +29,12 @@ from inspiration_one_backend.domain.errors import BusinessValidationError, NotFo
 from inspiration_one_backend.infrastructure.db.models import ImageToCodeJob, ResourceLibraryAsset
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
 from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes
-from inspiration_one_backend.infrastructure.storage import LocalStorage
+from inspiration_one_backend.infrastructure.storage import (
+    InvalidStorageObjectKey,
+    LocalStorage,
+    StorageObjectNotFound,
+    StorageObjectTooLarge,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -337,8 +343,13 @@ def load_image_to_code_source(
     ensure_resource_usable(asset)
     if asset.kind != ResourceLibraryAssetKind.IMAGE:
         raise BusinessValidationError("当前仅支持图片资源")
-    path = storage.resolve(asset.storage_path)
-    content = path.read_bytes()
+    try:
+        content = storage.read_bytes(
+            storage.object_key_for(asset),
+            max_bytes=ENHANCE_FINAL_MAX_UPLOAD_BYTES,
+        )
+    except (InvalidStorageObjectKey, StorageObjectNotFound, StorageObjectTooLarge) as exc:
+        raise BusinessValidationError("资源文件不存在") from exc
     width, height = image_dimensions_from_bytes(content)
     return ImageToCodeSourceSnapshot(
         owner_user_id=asset.owner_user_id,

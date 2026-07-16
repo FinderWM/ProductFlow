@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from inspiration_one_backend.application.admission import generation_running_capacity_available
 from inspiration_one_backend.application.auth import require_generation_resource_group_for_user
 from inspiration_one_backend.application.enhance.execution import (
+    ENHANCE_FINAL_MAX_UPLOAD_BYTES,
     EnhanceExecutionRequest,
     execute_enhance_execution,
     validate_enhance_final_resource_bounds,
@@ -58,7 +59,12 @@ from inspiration_one_backend.infrastructure.db.models import (
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
 from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes, infer_extension
 from inspiration_one_backend.infrastructure.provider_config import IMAGE_PURPOSE, generation_config_resource_group_ids
-from inspiration_one_backend.infrastructure.storage import LocalStorage
+from inspiration_one_backend.infrastructure.storage import (
+    InvalidStorageObjectKey,
+    LocalStorage,
+    StorageObjectNotFound,
+    StorageObjectTooLarge,
+)
 
 from .strategy import (
     DirectParams,
@@ -384,7 +390,11 @@ def upload_enhance_final(
     if actual != expected:
         raise BusinessValidationError("拼接结果尺寸不匹配")
     validate_enhance_final_resource_bounds(width=expected[0], height=expected[1], byte_count=len(content))
-    storage_key = storage.save_enhance_final(f"enhance/{job.id}", content, suffix=infer_extension(mime_type))
+    storage_key = storage.save_enhance_final(
+        f"enhance/{job.id}",
+        content,
+        content_type=mime_type,
+    )
     manifest["final_image_ref"] = storage_key
     manifest["final_status"] = "ready"
     manifest["final_mime_type"] = mime_type
@@ -471,8 +481,8 @@ def attach_enhance_job_to_image_session(
         )
 
     try:
-        final_bytes = storage.resolve(final_ref).read_bytes()
-    except (OSError, ValueError) as exc:
+        final_bytes = storage.read_bytes(final_ref, max_bytes=ENHANCE_FINAL_MAX_UPLOAD_BYTES)
+    except (InvalidStorageObjectKey, StorageObjectNotFound, StorageObjectTooLarge) as exc:
         raise BusinessValidationError("增强结果文件不存在") from exc
 
     dimensions = image_dimensions_from_bytes(final_bytes)
@@ -484,7 +494,7 @@ def attach_enhance_job_to_image_session(
     saved_path = storage.save_image_session_generated(
         source_asset.session_id,
         final_bytes,
-        suffix=infer_extension(mime_type),
+        content_type=mime_type,
     )
     generated_asset = ImageSessionAsset(
         owner_user_id=source_asset.owner_user_id,
@@ -585,7 +595,7 @@ def create_enhance_input_blob(
         raise BusinessValidationError("增强输入不是可解码图片")
     storage = storage or LocalStorage()
     blob_id = new_id()
-    storage_key = storage.save_enhance_input_blob(blob_id, content, suffix=infer_extension(mime_type))
+    storage_key = storage.save_enhance_input_blob(blob_id, content, content_type=mime_type)
     metadata = storage.metadata_for(storage_key)
     blob = EnhanceJobInput(
         id=blob_id,
@@ -1090,8 +1100,11 @@ def _loaded_source_from_storage(
     mime_type: str,
 ) -> LoadedEnhanceSource:
     try:
-        content = storage.resolve(storage.object_key_for(stored_object)).read_bytes()
-    except (OSError, ValueError) as exc:
+        content = storage.read_bytes(
+            storage.object_key_for(stored_object),
+            max_bytes=ENHANCE_FINAL_MAX_UPLOAD_BYTES,
+        )
+    except (InvalidStorageObjectKey, StorageObjectNotFound, StorageObjectTooLarge) as exc:
         raise BusinessValidationError("资源文件不存在") from exc
     dimensions = image_dimensions_from_bytes(content)
     if dimensions is None:

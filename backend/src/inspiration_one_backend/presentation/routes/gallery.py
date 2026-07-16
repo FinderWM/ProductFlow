@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.auth import user_has_api_permission
@@ -23,9 +22,8 @@ from inspiration_one_backend.domain.rbac import (
     API_RESOURCES_MODERATE,
 )
 from inspiration_one_backend.infrastructure.db.models import AuthUser, ImageGalleryEntry
-from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage
+from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage, StorageError
 from inspiration_one_backend.presentation.deps import get_session, require_admin, require_api_permission
-from inspiration_one_backend.presentation.image_variants import build_variant_filename
 from inspiration_one_backend.presentation.schemas.gallery import (
     GalleryEntryListResponse,
     GalleryEntryResponse,
@@ -38,6 +36,7 @@ from inspiration_one_backend.presentation.schemas.gallery import (
     serialize_gallery_entry,
     serialize_gallery_tag,
 )
+from inspiration_one_backend.presentation.storage_responses import image_storage_object, raise_storage_response_error
 
 router = APIRouter(
     prefix="/api/gallery",
@@ -110,6 +109,7 @@ def save_gallery_entry_endpoint(
 @router.get("/{entry_id}/image")
 def download_gallery_entry_image_endpoint(
     entry_id: str,
+    request: Request,
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_GALLERY_READ)),
@@ -119,17 +119,18 @@ def download_gallery_entry_image_endpoint(
         raise HTTPException(status_code=404, detail="画廊条目不存在")
     ensure_resource_usable(entry)
     storage = LocalStorage()
-    object_key = storage.object_key_for(entry)
     try:
-        path, media_type = storage.resolve_for_variant(
+        object_key = storage.object_key_for(entry)
+        return image_storage_object(
+            storage,
             object_key,
-            variant,
+            variant=variant,
+            range_header=request.headers.get("range"),
+            filename=entry.original_filename,
             fallback_media_type=entry.mime_type,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="画廊图片文件不存在") from exc
-    filename = build_variant_filename(entry.original_filename, variant=variant, resolved_suffix=path.suffix)
-    return FileResponse(path, media_type=media_type, filename=filename)
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="画廊图片文件不存在")
 
 
 @router.get("/tags", response_model=list[GalleryTagResponse])

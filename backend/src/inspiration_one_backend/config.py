@@ -191,7 +191,7 @@ IMAGE_TOOL_LEGACY_FIELD_KEYS: tuple[str, ...] = ("n",)
 DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS: tuple[str, ...] = tuple(key for key in IMAGE_TOOL_FIELD_KEYS if key != "background")
 DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS_TEXT = ",".join(DEFAULT_IMAGE_TOOL_ALLOWED_FIELDS)
 BACKEND_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_LOG_DIR = BACKEND_DIR / "storage" / "logs"
+DEFAULT_LOG_DIR = BACKEND_DIR / "logs"
 DEFAULT_PROMPT_BRIEF_SYSTEM = (
     "你是业务资料理解助手。请根据名称、分类、补充资料、目标用途和约束，输出简洁、结构化的中文 JSON。不要输出 markdown。"
 )
@@ -360,9 +360,12 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
     storage_root: Path = Path("./backend/storage")
+    storage_temp_root: Path | None = None
     storage_backend: Literal["local", "minio", "s3"] = "local"
     storage_public_base_url: str | None = None
+    storage_signed_url_ttl_seconds: int = Field(default=300, ge=30, le=3600)
     s3_endpoint_url: str | None = None
+    s3_public_endpoint_url: str | None = None
     s3_bucket: str = "inspiration-one"
     s3_access_key: str | None = None
     s3_secret_key: str | None = None
@@ -564,7 +567,23 @@ class Settings(BaseSettings):
         normalized = "" if value is None else str(value).strip().lower()
         return normalized or "local"
 
-    @field_validator("storage_public_base_url", "s3_endpoint_url", "s3_access_key", "s3_secret_key", mode="before")
+    @field_validator("storage_temp_root", mode="before")
+    @classmethod
+    def _normalize_optional_storage_path(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator(
+        "storage_public_base_url",
+        "s3_endpoint_url",
+        "s3_public_endpoint_url",
+        "s3_access_key",
+        "s3_secret_key",
+        mode="before",
+    )
     @classmethod
     def _normalize_optional_storage_text(cls, value: Any) -> str | None:
         normalized = "" if value is None else str(value).strip()
@@ -632,6 +651,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_storage_backend_config(self) -> Settings:
+        path_entries = [
+            ("STORAGE_ROOT", self.storage_root.expanduser().resolve()),
+            ("LOG_DIR", self.log_dir.expanduser().resolve()),
+        ]
+        if self.storage_temp_root is not None:
+            path_entries.append(("STORAGE_TEMP_ROOT", self.storage_temp_root.expanduser().resolve()))
+        for index, (left_name, left_path) in enumerate(path_entries):
+            for right_name, right_path in path_entries[index + 1 :]:
+                if left_path == right_path or left_path in right_path.parents or right_path in left_path.parents:
+                    raise ValueError(
+                        f"{left_name} 与 {right_name} 不能相同或存在父子目录关系: {left_path}, {right_path}"
+                    )
         if self.storage_backend == "local":
             return self
         missing_fields = [

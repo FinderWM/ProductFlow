@@ -28,11 +28,8 @@ from inspiration_one_backend.infrastructure.provider_config import (
 )
 from inspiration_one_backend.infrastructure.storage import LocalStorage
 
+from .limits import ENHANCE_FINAL_MAX_EDGE, ENHANCE_FINAL_MAX_PIXELS, ENHANCE_FINAL_MAX_UPLOAD_BYTES
 from .strategy import EnhanceContext, EnhanceResult
-
-ENHANCE_FINAL_MAX_PIXELS = 120_000_000
-ENHANCE_FINAL_MAX_EDGE = 16_384
-ENHANCE_FINAL_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)

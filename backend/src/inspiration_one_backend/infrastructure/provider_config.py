@@ -57,6 +57,7 @@ from inspiration_one_backend.infrastructure.provider_config_constants import (
     TEXT_STRUCTURED_OUTPUT_MODE_JSON_SCHEMA,
     TEXT_STRUCTURED_OUTPUT_MODE_KEY,
     TEXT_STRUCTURED_OUTPUT_MODES,
+    TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY,
     UNSET_PROVIDER_FIELD,
 )
 
@@ -239,6 +240,12 @@ def resolve_effective_max_dimension(provider_profile: ProviderProfile | None, gl
     if provider_max is None:
         return global_max
     return min(provider_max, global_max)
+
+
+def text_generation_config_supports_image_understanding(config: dict[str, Any] | None) -> bool:
+    if not isinstance(config, dict):
+        return False
+    return _optional_bool(config.get(TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY), default=False)
 
 
 def parse_image_size_dimensions(size: str) -> tuple[int, int]:
@@ -1127,6 +1134,7 @@ def claim_generation_config(
     resource_group_id: str | None = None,
     generation_config_id: str | None = None,
     required_max_dimension: int | None = None,
+    require_image_understanding: bool = False,
     now: datetime | None = None,
 ) -> GenerationConfigClaim | None:
     ensure_provider_config_bootstrapped(session, commit=False)
@@ -1137,12 +1145,17 @@ def claim_generation_config(
     runtime_settings = get_runtime_settings()
     global_max = runtime_settings.image_generation_max_dimension
 
+    if purpose == TEXT_PURPOSE and require_image_understanding and generation_config_id is None:
+        if not _text_image_understanding_config_available(session, resource_group_id=resource_group.id):
+            raise ValueError("当前供应商生成分组没有支持图片理解的文案生成配置")
+
     candidates = _candidate_generation_configs(
         session,
         purpose=purpose,
         resource_group_id=resource_group.id,
         generation_config_id=generation_config_id,
         required_max_dimension=required_max_dimension,
+        require_image_understanding=require_image_understanding,
         global_max=global_max,
         now=resolved_now,
     )
@@ -1824,6 +1837,7 @@ def _candidate_generation_configs(
     resource_group_id: str,
     generation_config_id: str | None,
     required_max_dimension: int | None,
+    require_image_understanding: bool,
     global_max: int,
     now: datetime,
 ) -> list[tuple[GenerationConfig, float]]:
@@ -1857,6 +1871,11 @@ def _candidate_generation_configs(
     for generation_config in configs:
         if not _generation_config_candidate_available(generation_config, now=now, manual=bool(generation_config_id)):
             continue
+        if purpose == TEXT_PURPOSE and require_image_understanding:
+            if not text_generation_config_supports_image_understanding(generation_config.config_json):
+                if generation_config_id:
+                    raise ValueError("手动指定的生成配置不支持图片理解")
+                continue
 
         # Filter by required_max_dimension if specified
         if required_max_dimension is not None:
@@ -1868,6 +1887,33 @@ def _candidate_generation_configs(
         candidates.append((generation_config, score))
     candidates.sort(key=lambda item: (item[1], item[0].priority, item[0].created_at), reverse=True)
     return candidates
+
+
+def _text_image_understanding_config_available(
+    session: Session,
+    *,
+    resource_group_id: str,
+) -> bool:
+    statement = (
+        select(GenerationConfig)
+        .join(
+            GenerationConfigResourceGroup,
+            GenerationConfigResourceGroup.generation_config_id == GenerationConfig.id,
+        )
+        .options(selectinload(GenerationConfig.provider_profile))
+        .where(
+            GenerationConfig.purpose == TEXT_PURPOSE,
+            GenerationConfigResourceGroup.resource_group_id == resource_group_id,
+            GenerationConfig.archived_at.is_(None),
+            GenerationConfig.enabled.is_(True),
+        )
+    )
+    for generation_config in session.scalars(statement).all():
+        if not generation_config_effective_enabled(generation_config):
+            continue
+        if text_generation_config_supports_image_understanding(generation_config.config_json):
+            return True
+    return False
 
 
 def _generation_config_candidate_available(
@@ -2102,9 +2148,15 @@ def _normalize_text_model_settings(model_settings: dict[str, Any]) -> dict[str, 
 
 def _normalize_binding_config(*, purpose: str, provider_kind: str, config: dict[str, Any]) -> dict[str, Any]:
     if purpose == TEXT_PURPOSE:
+        normalized = {
+            TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY: _optional_bool(
+                config.get(TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY),
+                default=False,
+            )
+        }
         if provider_kind in {"openai", "openai_chat_completions"}:
-            return {TEXT_STRUCTURED_OUTPUT_KEY: _normalize_text_structured_output_dict(config)}
-        return {}
+            normalized[TEXT_STRUCTURED_OUTPUT_KEY] = _normalize_text_structured_output_dict(config)
+        return normalized
     if purpose != IMAGE_PURPOSE:
         return {}
     if provider_kind == "openai_responses":

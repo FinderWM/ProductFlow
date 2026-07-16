@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.admission import generation_capacity_pool_for_workflow_node_type
 from inspiration_one_backend.application.auth import require_generation_resource_group_for_user
-from inspiration_one_backend.application.contracts import InspirationInput, TailSplitPlanInput
+from inspiration_one_backend.application.contracts import InspirationInput, ReferenceImageInput, TailSplitPlanInput
 from inspiration_one_backend.application.copy_payloads import (
     normalize_copy_node_config,
     normalize_copy_payload,
@@ -114,6 +114,7 @@ from inspiration_one_backend.infrastructure.storage import LocalStorage
 logger = logging.getLogger(__name__)
 
 COPY_PROVIDER_CONTRACT_MAX_ATTEMPTS = 2
+WORKFLOW_SOURCE_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 WORKFLOW_RESOURCE_GROUP_NODE_TYPES = frozenset(
     {
         WorkflowNodeType.COPY_GENERATION,
@@ -1410,12 +1411,24 @@ def _execute_copy_generation(
 
     storage = LocalStorage()
     source = find_source_asset(inspiration) if has_inspiration_context else None
+    source_image = (
+        ReferenceImageInput(
+            bytes_data=storage.read_bytes(storage.object_key_for(source), max_bytes=WORKFLOW_SOURCE_IMAGE_MAX_BYTES),
+            mime_type=source.mime_type,
+            filename=source.original_filename,
+            role="灵感主图",
+            label="灵感主图",
+            source_key=storage.object_key_for(source),
+        )
+        if source is not None
+        else None
+    )
     inspiration_input = InspirationInput(
         name=inspiration_context["name"] or "自由创作",
         category=inspiration_context["category"],
         price=inspiration_context["price"],
         source_note=inspiration_context["source_note"],
-        image_path=str(storage.resolve(storage.object_key_for(source))) if source is not None else "",
+        source_image=source_image,
     )
     incoming_context = collect_incoming_context(workflow, node.id)
     reference_images = reference_image_inputs_for_copy(
@@ -1439,6 +1452,7 @@ def _execute_copy_generation(
     runtime_claim = claim_runtime_generation_config(
         purpose="text",
         selection=generation_config_selection,
+        require_image_understanding=bool(inspiration_input.source_image or reference_images),
         session=session,
     )
     try:
@@ -1549,6 +1563,7 @@ def _execute_tail_splitter(
     runtime_claim = claim_runtime_generation_config(
         purpose="text",
         selection=generation_config_selection,
+        require_image_understanding=bool(reference_images),
         session=session,
     )
     try:

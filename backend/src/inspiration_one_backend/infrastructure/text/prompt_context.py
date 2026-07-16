@@ -5,6 +5,7 @@ from inspiration_one_backend.application.contracts import (
     CreativeBriefPayload,
     InspirationInput,
     ReferenceImageInput,
+    merge_reference_image_inputs,
 )
 from inspiration_one_backend.infrastructure.prompts import text_or_default
 from inspiration_one_backend.infrastructure.provider_config import TextStructuredOutputConfig
@@ -40,6 +41,17 @@ def build_copy_reference_text(reference_images: list[ReferenceImageInput] | None
     return "\n".join(reference_lines) if reference_lines else "未连接"
 
 
+def inspiration_source_image_input(inspiration: InspirationInput) -> ReferenceImageInput | None:
+    return inspiration.source_image
+
+
+def copy_context_reference_images(
+    inspiration: InspirationInput,
+    reference_images: list[ReferenceImageInput] | None = None,
+) -> list[ReferenceImageInput]:
+    return merge_reference_image_inputs(inspiration_source_image_input(inspiration), reference_images)
+
+
 def build_copy_user_content(
     inspiration: InspirationInput,
     brief: CreativeBriefPayload,
@@ -47,7 +59,7 @@ def build_copy_user_content(
     reference_images: list[ReferenceImageInput] | None = None,
 ) -> str:
     resolved_config = config or CopyNodeConfigV2()
-    reference_text = build_copy_reference_text(reference_images)
+    reference_text = build_copy_reference_text(copy_context_reference_images(inspiration, reference_images))
     return (
         f"灵感产物名：{inspiration.name}\n"
         f"类目：{inspiration.category or '未提供'}\n"

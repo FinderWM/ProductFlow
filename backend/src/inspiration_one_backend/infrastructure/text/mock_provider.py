@@ -21,6 +21,7 @@ from inspiration_one_backend.application.contracts import (
     VisualGuidance,
 )
 from inspiration_one_backend.infrastructure.text.base import TextProvider
+from inspiration_one_backend.infrastructure.text.prompt_context import copy_context_reference_images
 
 
 class MockTextProvider(TextProvider):
@@ -53,7 +54,7 @@ class MockTextProvider(TextProvider):
         price_line = f" 参考价 {inspiration.price}" if inspiration.price else ""
         note_line = f"，结合描述：{inspiration.source_note[:36]}" if inspiration.source_note else ""
         instruction_line = f"，本轮方向：{config.instruction[:32]}" if config.instruction else ""
-        reference_images = reference_images or []
+        reference_images = copy_context_reference_images(inspiration, reference_images)
         reference_hint = ""
         if reference_images:
             first_reference = reference_images[0]

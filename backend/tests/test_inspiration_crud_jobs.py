@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import (
     _enable_deletion,
+    _enable_text_generation_configs_image_understanding,
     _execute_workflow_queue_inline,
     _login,
     _make_demo_image_bytes,
@@ -45,6 +46,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     WorkflowRun,
 )
 from inspiration_one_backend.infrastructure.provider_config import TEXT_PURPOSE, add_generation_config
+from inspiration_one_backend.infrastructure.provider_config_constants import TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY
 
 
 @pytest.fixture(autouse=True)
@@ -543,7 +545,7 @@ def test_successful_workflow_generation_updates_inspiration_resource_group(
         provider_kind="mock",
         provider_profile_id=None,
         model_settings={"brief_model": "mock-brief", "copy_model": "mock-copy"},
-        config={},
+        config={TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY: True},
         priority=10,
         max_concurrency=1,
         enabled=True,
@@ -907,6 +909,7 @@ def test_inspiration_can_be_deleted_from_api(configured_env: Path, db_session) -
     app = create_app()
     client = TestClient(app)
     _login(client)
+    _enable_text_generation_configs_image_understanding(db_session)
 
     created = client.post(
         "/api/inspirations",
@@ -1185,7 +1188,7 @@ def test_inspiration_reference_image_can_be_deleted(configured_env: Path, db_ses
 
     db_session.expire_all()
     assert db_session.get(SourceAsset, reference_asset["id"]) is None
-    assert not reference_path.exists()
+    assert reference_path.exists()
 
     rejected = client.delete(f"/api/source-assets/{original_asset['id']}")
     assert rejected.status_code == 400

@@ -1,0 +1,14 @@
+services:
+  inspiration-one-backend:
+    environment:
+      STORAGE_ROOT: !reset null
+      STORAGE_TEMP_ROOT: /tmp/inspiration-one-storage
+    volumes: !override
+      - inspiration-one-logs:/app/logs
+
+  inspiration-one-worker:
+    environment:
+      STORAGE_ROOT: !reset null
+      STORAGE_TEMP_ROOT: /tmp/inspiration-one-storage
+    volumes: !override
+      - inspiration-one-logs:/app/logs

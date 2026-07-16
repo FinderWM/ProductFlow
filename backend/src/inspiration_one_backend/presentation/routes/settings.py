@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from inspiration_one_backend.application.auth import list_available_generation_resource_groups_for_user
 from inspiration_one_backend.application.auth_sessions import revoke_all_auth_sessions
-from inspiration_one_backend.application.contracts import CopyNodeConfigV2, InspirationInput
+from inspiration_one_backend.application.contracts import CopyNodeConfigV2, InspirationInput, ReferenceImageInput
 from inspiration_one_backend.application.image_generation_failures import classify_image_generation_failure
 from inspiration_one_backend.application.image_sessions import (
     abandon_image_generation_config_test_session,
@@ -24,6 +24,7 @@ from inspiration_one_backend.application.image_sessions import (
 from inspiration_one_backend.application.image_sessions import (
     test_image_generation_config as run_image_generation_config_test,
 )
+from inspiration_one_backend.application.moderation import ensure_resource_usable
 from inspiration_one_backend.application.time import now_utc
 from inspiration_one_backend.config import (
     CONFIG_DEFINITION_BY_KEY,
@@ -43,6 +44,8 @@ from inspiration_one_backend.config import (
     parse_config_multi_select,
     parse_image_tool_allowed_fields,
 )
+from inspiration_one_backend.domain.enums import ResourceLibraryAssetKind
+from inspiration_one_backend.domain.errors import BusinessValidationError
 from inspiration_one_backend.domain.rbac import (
     API_IMAGE_CHAT_READ,
     API_INSPIRATIONS_READ,
@@ -63,6 +66,7 @@ from inspiration_one_backend.infrastructure.db.models import (
     GenerationConfigTestResult,
     GenerationResourceGroup,
     ProviderProfile,
+    ResourceLibraryAsset,
     UserGenerationResourceGroupGrant,
     UserUiPreference,
 )
@@ -75,6 +79,7 @@ from inspiration_one_backend.infrastructure.db.models import (
 from inspiration_one_backend.infrastructure.provider_config import (
     IMAGE_PROVIDER_KINDS,
     TEXT_PROVIDER_KINDS,
+    TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY,
     UNSET_PROVIDER_FIELD,
     ResolvedImageProviderConfig,
     ResolvedTextProviderConfig,
@@ -106,6 +111,7 @@ from inspiration_one_backend.infrastructure.provider_models import (
     ProviderModelDiscoveryUnsupportedError,
     list_provider_models,
 )
+from inspiration_one_backend.infrastructure.storage import LocalStorage
 from inspiration_one_backend.infrastructure.text.factory import get_text_provider_from_config
 from inspiration_one_backend.infrastructure.text.prompt_context import (
     build_brief_system_instructions,
@@ -688,6 +694,71 @@ def _safe_text_generation_test_error_detail(exc: ValueError) -> str:
     if "未返回 JSON 对象" in detail:
         return detail.split("：", 1)[0].split(":", 1)[0]
     return detail[:500]
+
+
+def _load_text_generation_test_reference_images(
+    session: Session,
+    *,
+    actor_user_id: str,
+    reference_asset_ids: list[str],
+) -> list[ReferenceImageInput]:
+    ordered_ids: list[str] = []
+    for asset_id in reference_asset_ids:
+        normalized = str(asset_id or "").strip()
+        if normalized and normalized not in ordered_ids:
+            ordered_ids.append(normalized)
+    if not ordered_ids:
+        return []
+
+    assets = session.scalars(
+        select(ResourceLibraryAsset).where(
+            ResourceLibraryAsset.id.in_(ordered_ids),
+            ResourceLibraryAsset.owner_user_id == actor_user_id,
+            ResourceLibraryAsset.kind == ResourceLibraryAssetKind.IMAGE,
+            ResourceLibraryAsset.archived_at.is_(None),
+        )
+    ).all()
+    asset_by_id = {asset.id: asset for asset in assets}
+    storage = LocalStorage()
+    references: list[ReferenceImageInput] = []
+    for asset_id in ordered_ids:
+        asset = asset_by_id.get(asset_id)
+        if asset is None:
+            raise ValueError("参考图不存在")
+        try:
+            ensure_resource_usable(asset)
+        except BusinessValidationError as exc:
+            raise ValueError(str(exc)) from exc
+        references.append(
+            ReferenceImageInput(
+                bytes_data=storage.read_bytes(
+                    storage.object_key_for(asset),
+                    max_bytes=get_runtime_settings().upload_max_image_bytes,
+                ),
+                mime_type=asset.mime_type,
+                filename=asset.original_filename,
+                role="参考图",
+                label=asset.original_filename,
+                source_key=storage.object_key_for(asset),
+            )
+        )
+    return references
+
+
+def _sync_text_generation_config_image_understanding_support(
+    session: Session,
+    *,
+    generation_config_id: str | None,
+    enabled: bool,
+) -> None:
+    if not generation_config_id:
+        return
+    generation_config = session.get(GenerationConfig, generation_config_id)
+    if generation_config is None or generation_config.archived_at is not None or generation_config.purpose != "text":
+        return
+    next_config = dict(generation_config.config_json or {})
+    next_config[TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY] = enabled
+    update_generation_config(session, generation_config.id, config=next_config, commit=False)
 
 
 def _resolve_text_generation_config_for_test(
@@ -1463,6 +1534,7 @@ def list_my_generation_resource_groups_endpoint(
 )
 def test_text_generation_config_endpoint(
     payload: TextGenerationConfigTestRequest,
+    current_user: AuthUser = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> TextGenerationConfigTestResponse:
     try:
@@ -1472,13 +1544,18 @@ def test_text_generation_config_endpoint(
             generation_config_id=payload.generation_config_id,
             generation_config=payload.generation_config,
         )
+        reference_images = _load_text_generation_test_reference_images(
+            session,
+            actor_user_id=current_user.id,
+            reference_asset_ids=payload.reference_asset_ids,
+        )
         text_provider = get_text_provider_from_config(resolved_config)
         inspiration_input = InspirationInput(
             name=payload.inspiration.name,
             category=payload.inspiration.category,
             price=payload.inspiration.price,
             source_note=payload.inspiration.source_note,
-            image_path="",
+            source_image=None,
         )
         brief_start = perf_counter()
         brief, brief_model = text_provider.generate_brief(inspiration_input)
@@ -1491,7 +1568,7 @@ def test_text_generation_config_endpoint(
             requested_slots=payload.copy_request.requested_slots,
         )
         runtime_settings = get_runtime_settings()
-        reference_text = build_copy_reference_text([])
+        reference_text = build_copy_reference_text(reference_images)
         request_context = {
             "brief": {
                 "system_instructions": build_brief_system_instructions(
@@ -1505,14 +1582,31 @@ def test_text_generation_config_endpoint(
                     runtime_settings.prompt_copy_system,
                     resolved_config.structured_output,
                 ),
-                "user_content": build_copy_user_content(inspiration_input, brief, copy_config, []),
+                "user_content": build_copy_user_content(inspiration_input, brief, copy_config, reference_images),
             },
             "reference_text": reference_text,
         }
-        copy, copy_model = text_provider.generate_copy(inspiration_input, brief, copy_config)
+        copy, copy_model = text_provider.generate_copy(
+            inspiration_input,
+            brief,
+            copy_config,
+            reference_images=reference_images,
+        )
         duration_ms = int((perf_counter() - brief_start) * 1000)
+        if reference_images:
+            _sync_text_generation_config_image_understanding_support(
+                session,
+                generation_config_id=payload.generation_config_id,
+                enabled=True,
+            )
     except ValueError as exc:
         error_detail = _safe_text_generation_test_error_detail(exc)
+        if payload.reference_asset_ids:
+            _sync_text_generation_config_image_understanding_support(
+                session,
+                generation_config_id=payload.generation_config_id,
+                enabled=False,
+            )
         logger.info(
             "文案生成配置测试校验失败: generation_config_id=%s provider_kind=%s detail=%s",
             payload.generation_config_id or "-",
@@ -1529,6 +1623,12 @@ def test_text_generation_config_endpoint(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("文案生成配置测试失败")
+        if payload.reference_asset_ids:
+            _sync_text_generation_config_image_understanding_support(
+                session,
+                generation_config_id=payload.generation_config_id,
+                enabled=False,
+            )
         _try_persist_generation_config_test_failure(
             session,
             generation_config_id=payload.generation_config_id,

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from inspiration_one_backend.application.contracts import PosterGenerationInput
+from inspiration_one_backend.application.contracts import PosterGenerationInput, ReferenceImageInput
 from inspiration_one_backend.application.inspiration_workflow.image_generation import (
     generate_workflow_images_concurrently,
 )
@@ -73,13 +73,18 @@ def test_workflow_image_generation_uses_injected_renderer_factory() -> None:
             return b"injected-renderer-bytes"
 
     font_path = Path("/tmp/inspiration-one-injected-renderer.ttf")
-    source_path = Path("/tmp/inspiration-one-injected-source.png")
+    source_image = ReferenceImageInput(
+        bytes_data=b"injected-source-bytes",
+        mime_type="image/png",
+        filename="injected-source.png",
+        source_key="inspirations/test/injected-source.png",
+    )
 
     generated = generate_workflow_images_concurrently(
         render_input=PosterGenerationInput(
             inspiration_name="渲染注入测试",
             structured_copy_context="摘要：测试主标题\n卖点：卖点一\n卖点：卖点二\n卖点：卖点三",
-            source_image=source_path,
+            source_image=source_image,
         ),
         kind=PosterKind.MAIN_IMAGE,
         target_count=1,

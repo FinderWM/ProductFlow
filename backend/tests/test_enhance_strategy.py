@@ -183,7 +183,7 @@ def test_tiled_strategy_backend_stitch_writes_final(db_session) -> None:
 
     assert result.final_image_ref == "enhance/tiled-stitch/final.png"
     assert len(result.tiles) == 1
-    assert _image_size(storage.resolve(result.final_image_ref).read_bytes()) == (240, 180)
+    assert _image_size(storage.read_bytes(result.final_image_ref, max_bytes=10 * 1024 * 1024)) == (240, 180)
 
 
 def _image_bytes(width: int, height: int) -> bytes:

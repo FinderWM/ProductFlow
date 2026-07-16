@@ -33,6 +33,7 @@ from inspiration_one_backend.application.generation_config_runtime import (
     generation_failure_reason,
     release_runtime_generation_config,
 )
+from inspiration_one_backend.config import get_runtime_settings
 from inspiration_one_backend.domain.enums import (
     DeckMaterialSource,
     DeckSlideStatus,
@@ -44,9 +45,9 @@ from inspiration_one_backend.domain.errors import BusinessValidationError, NotFo
 from inspiration_one_backend.infrastructure.db.models import Deck, DeckSlide, EnhanceJob, Inspiration, new_id
 from inspiration_one_backend.infrastructure.db.session import get_session_factory
 from inspiration_one_backend.infrastructure.deck.styles import build_slide_image_prompt
-from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes, infer_extension
+from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes
 from inspiration_one_backend.infrastructure.image.chat_service import GeneratedChatImage, ImageChatService
-from inspiration_one_backend.infrastructure.storage import LocalStorage
+from inspiration_one_backend.infrastructure.storage import LocalStorage, StorageObjectNotFound, StorageObjectTooLarge
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +66,8 @@ def _storage_data_url(storage: LocalStorage, *, path: str | None, mime_type: str
     if not path:
         return None
     try:
-        raw = storage.resolve(path).read_bytes()
-    except OSError:
+        raw = storage.read_bytes(path, max_bytes=get_runtime_settings().upload_max_image_bytes)
+    except (StorageObjectNotFound, StorageObjectTooLarge):
         logger.warning("[Deck｜生成｜配图] 读取配图失败 path=%s", path)
         return None
     return f"data:{mime_type or 'image/png'};base64,{b64encode(raw).decode('utf-8')}"
@@ -76,8 +77,8 @@ def _storage_image_bytes(storage: LocalStorage, *, path: str | None) -> bytes | 
     if not path:
         return None
     try:
-        return storage.resolve(path).read_bytes()
-    except OSError:
+        return storage.read_bytes(path, max_bytes=get_runtime_settings().upload_max_image_bytes)
+    except (StorageObjectNotFound, StorageObjectTooLarge):
         logger.warning("[Deck｜生成｜配图] 读取配图失败 path=%s", path)
         return None
 
@@ -222,7 +223,10 @@ def execute_deck_slide_generation_task(slide_id: str) -> None:
                 manual_reference_images=references,
             )
             relative_path = storage.save_deck_slide_image(
-                deck.id, slide.order_index, result.bytes_data, suffix=infer_extension(result.mime_type)
+                deck.id,
+                slide.order_index,
+                result.bytes_data,
+                content_type=result.mime_type,
             )
             _apply_image_metadata(slide, storage, relative_path, result)
             slide.slide_status = DeckSlideStatus.COMPLETED
@@ -308,11 +312,9 @@ def enhance_deck_slide_material(
     result = outcome.result
     if result.final_image_ref is None:
         raise BusinessValidationError("图片增强结果不存在")
-    _final_path, final_mime_type = storage.resolve_for_variant(
-        result.final_image_ref,
-        "original",
-        fallback_media_type=source_mime_type,
-    )
+    final_mime_type = storage.stat(result.final_image_ref).content_type
+    if not final_mime_type.startswith("image/"):
+        final_mime_type = source_mime_type
     input_blob = create_enhance_input_blob(
         session,
         content=source_bytes,

@@ -536,10 +536,7 @@ class OpenAIChatImageProvider(ImageProvider):
                 f"{poster.structured_copy_context}"
             )
         if poster.reference_images or poster.source_image is not None:
-            reference_paths = {str(reference.path.resolve()) for reference in poster.reference_images}
-            if poster.source_image is not None:
-                reference_paths.add(str(poster.source_image.resolve()))
-            lines.append(f"- 参考图片数量：{len(reference_paths)}")
+            lines.append(f"- 参考图片数量：{len(build_responses_reference_images_from_poster(poster))}")
             if poster.source_image is not None:
                 lines.append("- 灵感产物原图：第 1 张输入图片")
             reference_labels = [

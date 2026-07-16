@@ -29,7 +29,11 @@ from inspiration_one_backend.infrastructure.db.models import (
     WorkflowNode,
 )
 from inspiration_one_backend.infrastructure.image.base import infer_extension
-from inspiration_one_backend.infrastructure.storage import LocalStorage
+from inspiration_one_backend.infrastructure.storage import (
+    InvalidStorageObjectKey,
+    LocalStorage,
+    StorageObjectNotFound,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,12 +230,15 @@ def materialize_poster_variant_source_asset(
         return asset
 
     storage = storage or LocalStorage()
-    try:
-        content = storage.resolve(storage.object_key_for(poster)).read_bytes()
-    except (OSError, ValueError) as exc:
-        raise BusinessValidationError("海报文件不存在") from exc
     filename = f"poster-{poster.id}{infer_extension(poster.mime_type)}"
-    reference_path = storage.save_reference_upload(workflow.inspiration_id, filename, content)
+    try:
+        reference_path = storage.copy_to_reference_upload(
+            storage.object_key_for(poster),
+            workflow.inspiration_id,
+            content_type=poster.mime_type,
+        )
+    except (InvalidStorageObjectKey, StorageObjectNotFound) as exc:
+        raise BusinessValidationError("海报文件不存在") from exc
     storage_metadata = storage.metadata_for(reference_path)
     asset = SourceAsset(
         inspiration_id=workflow.inspiration_id,

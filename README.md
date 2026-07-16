@@ -211,7 +211,7 @@ docker compose up -d --build
 Compose 默认启动：
 
 - 后端 API：服务名 `inspiration-one-backend`，宿主机端口 `${APP_HOST_PORT:-29280}`。
-- Dramatiq worker：服务名 `inspiration-one-worker`，与 API 共享外部 PostgreSQL、Redis 和 storage 卷。
+- Dramatiq worker：服务名 `inspiration-one-worker`，与 API 共享外部 PostgreSQL、Redis；仅 local 后端共享 storage 卷。
 - Web：服务名 `inspiration-one-web`，nginx 静态服务，宿主机端口 `${WEB_PORT:-29281}`。
 
 PostgreSQL、Redis 和 MinIO 由 `/Users/yunlong/project/self/env` 下的独立 Docker 中间件维护。Inspiration One 使用：
@@ -222,7 +222,7 @@ PostgreSQL、Redis 和 MinIO 由 `/Users/yunlong/project/self/env` 下的独立 
 
 如应用端口已被占用，可在 `.env` 中修改 `APP_HOST_PORT` 或 `WEB_PORT`，再重新执行 `docker compose up -d --build`。
 
-容器内应用通过 `.env` 中的外部连接 URL 访问共享中间件：
+容器内应用通过 `.env` 中的外部连接 URL 访问共享中间件。下面是 local 后端配置：
 
 ```text
 DATABASE_URL=postgresql+psycopg://inspiration-one:<POSTGRES_PASSWORD>@host.docker.internal:15432/inspiration_flow
@@ -233,23 +233,34 @@ STORAGE_BACKEND=local
 
 文件存储通过 `STORAGE_BACKEND` 切换：
 
-- `local`：上传和生成文件存入 `STORAGE_ROOT`，Compose 默认使用 Docker named volume `inspiration-one-storage`。
-- `minio`：通过 S3 兼容接口写入共享 MinIO，PgSQL 保存对象 key 和后端/bucket 元数据，API 响应时按当前配置拼接公开访问 URL，`STORAGE_ROOT` 只作为本地缓存目录。
-- `s3`：预留给其他 S3 兼容对象存储；接入时填写 `STORAGE_PUBLIC_BASE_URL`、`S3_ENDPOINT_URL`、`S3_BUCKET`、`S3_ACCESS_KEY`、`S3_SECRET_KEY`、`S3_REGION`。
+- `local`：上传和生成文件持久化到 `STORAGE_ROOT`，Compose 默认使用 Docker named volume `inspiration-one-storage`。
+- `minio`：共享 MinIO 是唯一持久化文件真源，API/worker 不挂载业务 storage volume。
+- `s3`：其他 S3 兼容对象存储是唯一持久化文件真源；配置项与 MinIO 相同。
 
 使用共享 MinIO 时，`.env` 需要设置：
 
 ```env
 STORAGE_BACKEND=minio
 S3_ENDPOINT_URL=http://host.docker.internal:19000
-STORAGE_PUBLIC_BASE_URL=http://localhost:19000
+S3_PUBLIC_ENDPOINT_URL=http://localhost:19000
 S3_BUCKET=inspiration-one
 S3_ACCESS_KEY=<MINIO_APP_ACCESS_KEY>
 S3_SECRET_KEY=<MINIO_APP_SECRET_KEY>
 S3_REGION=us-east-1
+STORAGE_SIGNED_URL_TTL_SECONDS=300
 ```
 
-容器运行时 `STORAGE_ROOT` 固定为 `/app/storage`，不要写入宿主机路径。`STORAGE_BACKEND=local` 时上传和生成文件存入 Docker named volume `inspiration-one-storage`，容器重启后数据保留；`STORAGE_BACKEND=minio` 时文件写入 MinIO，PgSQL 只保存对象 key 和必要的后端/bucket 元数据，API 响应时再按当前 `STORAGE_PUBLIC_BASE_URL` + bucket + object key 拼接访问 URL，`/app/storage` 仅用于缓存和缩略图派生。
+`S3_PUBLIC_ENDPOINT_URL` 用于生成浏览器可访问的短时附件签名 URL，可以留空；留空时附件由后端同源流式传输。图片、Enhance 切片、Deck 页面图和图片转代码预览始终使用稳定的应用内 URL，由后端同源代理，因此 bucket 可以保持私有。`STORAGE_PUBLIC_BASE_URL` 仅作为旧环境对 `S3_PUBLIC_ENDPOINT_URL` 的兼容 fallback。
+
+对象存储模式必须加载 override：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.object-storage.yml up -d --build
+```
+
+该组合会移除 API/worker 的 `/app/storage` 挂载，设置 `STORAGE_TEMP_ROOT=/tmp/inspiration-one-storage`，并保留独立日志卷。临时目录只服务于请求或任务作用域内的短暂物化，不承载业务状态。图片变体保存在对象存储并由后台任务异步生成；变体尚未完成时，受控 URL 返回原图并禁止缓存。
+
+`STORAGE_ROOT` 和 `STORAGE_HOST_PATH` 只属于 local 后端。local 模式下，容器内 `STORAGE_ROOT=/app/storage`，上传和生成文件存入 `inspiration-one-storage` named volume。对象模式不读取 `STORAGE_ROOT`，也不会从本地同名文件回退。
 
 从旧 systemd 生产环境迁移到 Compose 时，如已有生产文件目录（例如 `/home/cot/Inspiration One-release/shared/storage`），可在 `.env` 中设置 host-only 变量复用旧文件：
 
@@ -257,7 +268,9 @@ S3_REGION=us-east-1
 STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage
 ```
 
-`STORAGE_HOST_PATH` 仅用于 Compose bind mount 的宿主机路径；API/worker 容器内仍使用 `STORAGE_ROOT=/app/storage`。留空或不设置时使用 `inspiration-one-storage` named volume。普通更新不要执行 `docker compose down -v`，也不要为切换 storage 挂载删除 Docker volume；如需回到 named volume，移除 `STORAGE_HOST_PATH` 后重新执行 `docker compose up -d`。
+`STORAGE_HOST_PATH` 仅用于 local Compose bind mount 的宿主机路径；API/worker 容器内仍使用 `STORAGE_ROOT=/app/storage`。留空或不设置时使用 `inspiration-one-storage` named volume。普通更新不要执行 `docker compose down -v`，也不要为切换 storage 挂载删除 Docker volume；如需回到 named volume，移除 `STORAGE_HOST_PATH` 后重新执行 `docker compose up -d`。
+
+旧 `backend/backend/storage-dev` 不参与当前对象存储架构，也不提供审计、迁移、修复或缺失对象恢复流程。
 
 ### 3. 数据库迁移
 
@@ -305,7 +318,7 @@ docker compose logs -f inspiration-one-backend inspiration-one-worker inspiratio
 docker compose down
 ```
 
-停止服务不会删除数据卷。确认需要清空数据库、Redis 和 storage 时再执行：
+停止服务不会删除数据卷。确认需要清空本项目的 storage 与日志卷时再执行：
 
 ```bash
 docker compose down -v
@@ -341,7 +354,7 @@ cp web/.env.example web/.env
 - `SESSION_SECRET`：签名 session cookie 的长随机字符串。
 - `POSTGRES_PASSWORD`：共享 PostgreSQL 密码，同时保持 `.env.dev` 的 `DATABASE_URL` 中密码一致。
 
-`.env.dev.example` 使用开发端口、Redis DB 0、共享 PostgreSQL 中的 `inspiration_flow`，并默认 `STORAGE_BACKEND=minio`。`scripts/with_dev_env.sh` 会读取 `/Users/yunlong/project/self/env/minio.env`，自动导出本机进程需要的 `S3_*` 变量。使用单独开发数据库时，需要在 PostgreSQL 中创建对应数据库，再调整 `.env.dev` 的 `DATABASE_URL`。本地开发的 `STORAGE_ROOT=./backend/storage-dev` 只作为对象缓存目录；避免通过 `source .env` 或生产 `STORAGE_HOST_PATH` 启动开发进程。
+`.env.dev.example` 使用开发端口、Redis DB 0、共享 PostgreSQL 中的 `inspiration_flow`，并默认 `STORAGE_BACKEND=minio`。`scripts/with_dev_env.sh` 会读取 `/Users/yunlong/project/self/env/minio.env`，自动导出本机进程需要的 `S3_*` 变量。使用单独开发数据库时，需要在 PostgreSQL 中创建对应数据库，再调整 `.env.dev` 的 `DATABASE_URL`。MinIO 是开发对象模式的唯一持久化文件真源；临时物化默认使用操作系统临时目录。避免通过 `source .env` 或生产 `STORAGE_HOST_PATH` 启动开发进程。
 
 ### 3. 确认共享中间件运行
 
@@ -439,7 +452,7 @@ Inspiration One 把文本和图片能力分开配置。基础设施配置（数�
 ## 常用命令
 
 | 目的 | 使用 `just` | 无 `just` 时执行 |
-|---|---|---|
+| --- | --- | --- |
 | 安装后端依赖 | `just backend-install` | `uv sync --directory backend --extra dev` |
 | 安装前端依赖 | `just web-install` | `pnpm --dir web install` |
 | 应用开发库迁移 | `just backend-migrate` | `bash scripts/with_dev_env.sh uv run --directory backend alembic upgrade head` |
@@ -453,9 +466,9 @@ Inspiration One 把文本和图片能力分开配置。基础设施配置（数�
 | 发布 dry run | `just release-dry-run` | `DRY_RUN=1 bash scripts/release.sh` |
 | 生产更新 | `just release` | `bash scripts/release.sh` |
 
-`just release` / `bash scripts/release.sh` 是 Docker Compose 生产更新入口。流程包括 `docker compose config --quiet`、停止可能占用 `29280/29281` 的 legacy user-level systemd 服务、`docker compose up -d --build --remove-orphans`，以及 backend `/healthz`、web `/healthz`、web 代理 `/api/healthz` 检查。该流程不会删除 Docker volumes；普通更新不要执行 `docker compose down -v`。复用旧 systemd 生产文件时，在 `.env` 中设置 `STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage`。已手动迁走旧服务时，可临时执行 `LEGACY_SYSTEMD_ACTION=skip bash scripts/release.sh`，或使用 `LEGACY_SYSTEMD_ACTION=skip just release`。
+`just release` / `bash scripts/release.sh` 是 Docker Compose 生产更新入口。脚本读取 `.env` 中的 `STORAGE_BACKEND`：local 使用 `docker-compose.yml`，minio/s3 自动追加 `docker-compose.object-storage.yml`。流程包括对应 Compose 组合的配置与 storage mount 断言、停止可能占用 `29280/29281` 的 legacy user-level systemd 服务、重建启动，以及 backend `/healthz`、web `/healthz`、web 代理 `/api/healthz` 检查。该流程不会删除 Docker volumes；普通更新不要执行 `docker compose down -v`。local 后端复用旧 systemd 生产文件时，在 `.env` 中设置 `STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage`。已手动迁走旧服务时，可临时执行 `LEGACY_SYSTEMD_ACTION=skip bash scripts/release.sh`，或使用 `LEGACY_SYSTEMD_ACTION=skip just release`。
 
-`just release-dry-run` / `DRY_RUN=1 bash scripts/release.sh` 只校验 Compose 配置并打印实际发布会执行的步骤；不会停止 systemd 服务、不会构建镜像，也不会启动或切换运行中的服务。
+`just release-dry-run` / `DRY_RUN=1 bash scripts/release.sh` 校验与 `STORAGE_BACKEND` 对应的 Compose 文件组合并打印实际命令；不会停止 systemd 服务、不会构建镜像，也不会启动或切换运行中的服务。
 
 ## 主要 API 资源
 

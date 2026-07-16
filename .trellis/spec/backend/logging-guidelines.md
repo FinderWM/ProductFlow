@@ -77,8 +77,7 @@ Then log at the boundary where the event is meaningful:
 - `info`: lifecycle events that operators need, such as worker job start/finish, queue recovery summaries, or provider
   mode selection.
 - `warning`: recoverable anomalies worth investigation, such as provider fallback, sanitized provider failure, capacity
-  requeue, or a failed thumbnail variant fallback in `LocalStorage.resolve_for_variant(...)` if that behavior becomes
-  hard to diagnose.
+  requeue, or best-effort image-variant scheduling failure if that behavior becomes hard to diagnose.
 - `exception`: unexpected failures that are caught and would otherwise disappear, such as durable enqueue failure after
   a row was already created or an automatic retry enqueue failure.
 - `error`: handled failures that are not exceptions at the logging site but still need operator attention.
@@ -92,10 +91,12 @@ Do not add `print(...)` to backend application code for diagnostics. Use tests o
 ## Scenario: Request and worker log context
 
 ### 1. Scope / Trigger
+
 - Trigger: adding API middleware, worker actor boundaries, queue recovery, or logging formatter changes that affect
   request/job/task correlation.
 
 ### 2. Signatures
+
 - `new_request_id() -> str`
 - `set_request_id(request_id: str) -> Token[str]` / `reset_request_id(token: Token[str]) -> None`
 - `set_workflow_run_id(workflow_run_id: str) -> Token[str]` / `reset_workflow_run_id(token: Token[str]) -> None`
@@ -107,6 +108,7 @@ Do not add `print(...)` to backend application code for diagnostics. Use tests o
 - API header contract: request `X-Request-ID` is optional; response `X-Request-ID` is always set.
 
 ### 3. Contracts
+
 - Log lines include stable, human-readable fields: `request_id`, `workflow_run_id`, `workflow_node_run_id`, and
   `image_session_generation_task_id`.
 - API requests accept incoming `X-Request-ID`; when missing, the backend generates one and returns it in the same response
@@ -121,6 +123,7 @@ Do not add `print(...)` to backend application code for diagnostics. Use tests o
   logging. Use the existing contextvar boundary helpers.
 
 ### 4. Validation & Error Matrix
+
 - Missing request header -> generate a non-empty request id and return it in `X-Request-ID`.
 - Incoming request header present -> preserve the exact value and return the same value in `X-Request-ID`.
 - Route handler raises -> request context still resets in `finally`; response header should remain attached when the
@@ -129,6 +132,7 @@ Do not add `print(...)` to backend application code for diagnostics. Use tests o
 - Ordinary startup/recovery logs -> formatter fields render as `-`, not stale ids.
 
 ### 5. Good/Base/Bad Cases
+
 - Good: API log emitted during a request includes `request_id=<id>` and the HTTP response has the same `X-Request-ID`.
 - Good: inspiration workflow worker logs include `workflow_run_id=<run id>` without manual string interpolation at every
   logging call.
@@ -139,6 +143,7 @@ Do not add `print(...)` to backend application code for diagnostics. Use tests o
 - Bad: setting a contextvar without resetting the token in `finally`.
 
 ### 6. Tests Required
+
 - Formatter unit test asserting both active context values and stable `-` placeholders.
 - API middleware test asserting incoming/generated `X-Request-ID` and context cleanup after the request.
 - Worker actor boundary test asserting `workflow_run_id` / `workflow_node_run_id` /
@@ -146,6 +151,7 @@ Do not add `print(...)` to backend application code for diagnostics. Use tests o
 - Run `uv run --directory backend ruff check .` and backend tests after formatter or middleware changes.
 
 ### 7. Wrong vs Correct
+
 #### Wrong
 
 ```python
@@ -166,15 +172,18 @@ finally:
 ## Scenario: Metrics boundary
 
 ### 1. Scope / Trigger
+
 - Trigger: requests to add queue metrics, generation counters, Prometheus/OpenTelemetry integration, or a metrics endpoint.
 
 ### 2. Signatures
+
 - No metrics endpoint exists in the current backend contract.
 - Durable state entrypoints remain the source for operational inspection:
   `WorkflowRun`, `WorkflowNodeRun`, `ImageSessionGenerationTask`, `recover_unfinished_workflow_runs(...)`, and
   `recover_unfinished_image_session_generation_tasks(...)`.
 
 ### 3. Contracts
+
 - Do not add Prometheus, OpenTelemetry, structlog, loguru, APM agents, or a metrics endpoint without a dedicated task.
 - Do not add ad-hoc route-level counters.
 - Keep generation progress and failure evidence in durable database state:
@@ -185,22 +194,26 @@ finally:
   `recover_unfinished_image_session_generation_tasks(...)`.
 
 ### 4. Validation & Error Matrix
+
 - Need current task/run progress -> query durable rows through existing application/API paths.
 - Need queue recovery evidence -> use recovery summaries and persisted task/run state.
 - Need external metrics scraping -> create a dedicated observability task before introducing dependencies or endpoint
   contracts.
 
 ### 5. Good/Base/Bad Cases
+
 - Good: document a metrics tradeoff in this spec or task research before adding implementation.
 - Base: rely on durable statuses and request/worker ids for investigation.
 - Bad: adding `/metrics` opportunistically during unrelated logging work.
 - Bad: logging full prompts, provider responses, upload bytes, cookies, or data URLs as a substitute for metrics.
 
 ### 6. Tests Required
+
 - No tests are required for a documented non-implementation decision.
 - If a future metrics endpoint is approved, add endpoint tests plus secret/payload redaction coverage.
 
 ### 7. Wrong vs Correct
+
 #### Wrong
 
 ```python
@@ -260,14 +273,17 @@ Use logs to aid diagnosis, not as the only source of truth for behavior.
 ## Scenario: Persistent API and worker logs
 
 ### 1. Scope / Trigger
+
 - Trigger: backend process startup, worker startup, workflow execution, queue recovery, or log retention changes.
 
 ### 2. Signatures
+
 - `configure_logging(settings: Settings | None = None) -> None` configures root logging once per process.
 - `cleanup_old_logs(settings: Settings | None = None) -> int` deletes `*.log*` files older than retention days.
 - Environment-backed settings: `LOG_DIR`, `LOG_LEVEL`, `LOG_MAX_BYTES`, `LOG_BACKUP_COUNT`, `LOG_RETENTION_DAYS`.
 
 ### 3. Contracts
+
 - API startup calls `configure_logging(...)` during app creation and `cleanup_old_logs(...)` during lifespan startup before
   queue recovery.
 - Dramatiq worker import calls `configure_logging()`, and the Dramatiq CLI startup path calls `cleanup_old_logs()` before
@@ -275,6 +291,9 @@ Use logs to aid diagnosis, not as the only source of truth for behavior.
 - Default log path is the repository backend storage log file (`backend/storage/logs/inspiration-one.log`, resolved from
   the backend package location rather than the process working directory); storage/log files are ignored by git. `LOG_DIR`
   may still override the directory explicitly.
+- Docker Compose always overrides `LOG_DIR` onto the independent `inspiration-one-logs` volume: API uses
+  `/app/logs/backend`, worker uses `/app/logs/worker`. Logs must not share the local business storage root, and the
+  object-storage override must retain the log mount while removing `/app/storage`.
 - File logs use `RotatingFileHandler` with configured max bytes and backup count. Stdout/stderr logging remains available
   for service managers.
 - Uvicorn `uvicorn.error` and `uvicorn.access` records must also be mirrored into the same persistent file when their
@@ -283,21 +302,25 @@ Use logs to aid diagnosis, not as the only source of truth for behavior.
   root/Uvicorn mirrors so console output and file lines are not duplicated.
 
 ### 4. Validation & Error Matrix
+
 - Log dir missing -> create it.
 - `LOG_RETENTION_DAYS <= 0` -> skip age cleanup.
 - One expired log cannot be deleted -> log exception and continue other files.
 - Sensitive config/provider values -> never log them; log IDs, statuses, and concise failure reasons only.
 
 ### 5. Good/Base/Bad Cases
+
 - Good: workflow run created, node start/success/failure, queue recovery, and cleanup summary appear in persistent logs.
 - Base: tests assert cleanup by filesystem state rather than scraping log text.
 - Bad: adding `print(...)` diagnostics or logging provider keys/full prompts/upload bytes.
 
 ### 6. Tests Required
+
 - Unit regression that `cleanup_old_logs(...)` deletes expired log files and preserves fresh logs.
 - Backend ruff and workflow tests after adding new logger calls.
 
 ### 7. Wrong vs Correct
+
 #### Wrong
 
 ```python

@@ -3,8 +3,8 @@ from __future__ import annotations
 import mimetypes
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.image_to_code.jobs import (
@@ -18,13 +18,18 @@ from inspiration_one_backend.application.image_to_code.jobs import (
 from inspiration_one_backend.domain.enums import JobStatus
 from inspiration_one_backend.domain.rbac import API_IMAGE_TO_CODE_GENERATE, API_IMAGE_TO_CODE_READ
 from inspiration_one_backend.infrastructure.db.models import AuthUser
-from inspiration_one_backend.infrastructure.storage import LocalStorage
+from inspiration_one_backend.infrastructure.storage import LocalStorage, StorageError
 from inspiration_one_backend.presentation.deps import get_session, require_api_permission
 from inspiration_one_backend.presentation.schemas.image_to_code import (
     CreateImageToCodeJobRequest,
     ImageToCodeJobListResponse,
     ImageToCodeJobResponse,
     serialize_image_to_code_job,
+)
+from inspiration_one_backend.presentation.storage_responses import (
+    download_storage_object,
+    raise_storage_response_error,
+    stream_storage_object,
 )
 
 router = APIRouter(prefix="/api/image-to-code-jobs", tags=["image_to_code"])
@@ -144,9 +149,10 @@ def retry_image_to_code_job_endpoint(
 @router.get("/{job_id}/preview")
 def image_to_code_preview_endpoint(
     job_id: str,
+    request: Request,
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_IMAGE_TO_CODE_READ)),
-) -> FileResponse:
+) -> Response:
     job = get_image_to_code_job(
         session,
         job_id,
@@ -156,8 +162,13 @@ def image_to_code_preview_endpoint(
     storage_key = _preview_index_storage_key(job.result_manifest_json)
     if storage_key is None:
         raise HTTPException(status_code=404, detail="网页预览不存在")
-    path = _resolve_storage_key(storage_key, detail="网页预览不存在")
-    return FileResponse(path, media_type="text/html; charset=utf-8", headers=_HTML_PREVIEW_HEADERS)
+    return _stream_storage_key(
+        storage_key,
+        detail="网页预览不存在",
+        range_header=request.headers.get("range"),
+        media_type="text/html; charset=utf-8",
+        extra_headers=_HTML_PREVIEW_HEADERS,
+    )
 
 
 @router.get("/{job_id}/preview/assets/{asset_path:path}")
@@ -165,9 +176,10 @@ def image_to_code_preview_endpoint(
 def image_to_code_preview_asset_endpoint(
     job_id: str,
     asset_path: str,
+    request: Request,
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_IMAGE_TO_CODE_READ)),
-) -> FileResponse:
+) -> Response:
     job = get_image_to_code_job(
         session,
         job_id,
@@ -178,17 +190,23 @@ def image_to_code_preview_asset_endpoint(
     if storage_key is None:
         raise HTTPException(status_code=404, detail="网页预览资源不存在")
     media_type = mimetypes.guess_type(asset_path)[0] or "application/octet-stream"
-    path = _resolve_storage_key(storage_key, detail="网页预览资源不存在")
-    return FileResponse(path, media_type=media_type, headers={"X-Content-Type-Options": "nosniff"})
+    return _stream_storage_key(
+        storage_key,
+        detail="网页预览资源不存在",
+        range_header=request.headers.get("range"),
+        media_type=media_type,
+        extra_headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/{job_id}/artifacts/{artifact_id}/download")
 def download_image_to_code_artifact_endpoint(
     job_id: str,
     artifact_id: str,
+    request: Request,
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_IMAGE_TO_CODE_READ)),
-) -> FileResponse:
+) -> Response:
     job = get_image_to_code_job(
         session,
         job_id,
@@ -203,13 +221,20 @@ def download_image_to_code_artifact_endpoint(
     mime_type = artifact.get("mime_type")
     if not isinstance(storage_key, str) or not storage_key:
         raise HTTPException(status_code=404, detail="交付文件不存在")
-    path = _resolve_storage_key(storage_key, detail="交付文件不存在")
-    return FileResponse(
-        path,
-        media_type=str(mime_type or "application/octet-stream"),
-        filename=str(filename or artifact_id),
-        headers={"X-Content-Type-Options": "nosniff"},
-    )
+    resolved_media_type = str(mime_type or "application/octet-stream")
+    storage = LocalStorage()
+    try:
+        return download_storage_object(
+            storage,
+            storage_key,
+            filename=str(filename or artifact_id),
+            range_header=request.headers.get("range"),
+            media_type=resolved_media_type,
+            extra_headers={"X-Content-Type-Options": "nosniff"},
+            allow_presign=not resolved_media_type.startswith("image/"),
+        )
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="交付文件不存在")
 
 
 def _artifact_record(manifest: dict[str, Any] | None, artifact_id: str) -> dict[str, Any] | None:
@@ -235,8 +260,22 @@ def _preview_asset_storage_key(manifest: dict[str, Any] | None, asset_path: str)
     return storage_key if isinstance(storage_key, str) and storage_key else None
 
 
-def _resolve_storage_key(storage_key: str, *, detail: str) -> Any:
+def _stream_storage_key(
+    storage_key: str,
+    *,
+    detail: str,
+    range_header: str | None,
+    media_type: str,
+    extra_headers: dict[str, str],
+) -> Response:
+    storage = LocalStorage()
     try:
-        return LocalStorage().resolve(storage_key)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=detail) from exc
+        return stream_storage_object(
+            storage,
+            storage_key,
+            range_header=range_header,
+            media_type=media_type,
+            extra_headers=extra_headers,
+        )
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail=detail)

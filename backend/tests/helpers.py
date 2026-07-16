@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
     from inspiration_one_backend.application.inspiration_workflow_dependencies import WorkflowExecutionDependencies
 
 
@@ -55,6 +57,34 @@ def _login(client: TestClient) -> None:
 def _enable_deletion(client: TestClient) -> None:
     response = client.patch("/api/settings", json={"values": {"deletion_enabled": True}})
     assert response.status_code == 200
+
+
+def _enable_text_generation_configs_image_understanding(
+    session: Session,
+    *,
+    commit: bool = True,
+) -> None:
+    from inspiration_one_backend.infrastructure.provider_config import (
+        TEXT_PURPOSE,
+        list_generation_configs,
+        update_generation_config,
+    )
+    from inspiration_one_backend.infrastructure.provider_config_constants import (
+        TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY,
+    )
+
+    try:
+        for generation_config in list_generation_configs(session):
+            if generation_config.purpose != TEXT_PURPOSE:
+                continue
+            next_config = dict(generation_config.config_json or {})
+            next_config[TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY] = True
+            update_generation_config(session, generation_config.id, config=next_config, commit=False)
+        if commit:
+            session.commit()
+    except Exception:
+        session.rollback()
+        raise
 
 
 def _wait_for_workflow_run(

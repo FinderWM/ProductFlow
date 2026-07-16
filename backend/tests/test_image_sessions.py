@@ -101,7 +101,9 @@ def test_image_session_rounds_support_same_conversation(configured_env: Path) ->
     assert first_payload["rounds"][0]["generated_asset"]["thumbnail_url"].endswith("variant=thumbnail")
     thumbnail = client.get(first_payload["rounds"][0]["generated_asset"]["thumbnail_url"])
     assert thumbnail.status_code == 200
-    assert max(_read_image_size(thumbnail.content)) <= 320
+    assert _read_image_size(thumbnail.content) == (1024, 1024)
+    assert thumbnail.headers["cache-control"] == "no-store"
+    assert thumbnail.headers["x-image-variant"] == "pending"
 
     upload = client.post(
         f"/api/image-sessions/{session_id}/reference-images",
@@ -1256,8 +1258,12 @@ def test_image_session_generation_cancel_after_file_save_does_not_persist_round_
         def __getattr__(self, name: str):
             return getattr(self.inner, name)
 
-        def save_image_session_generated(self, session_id: str, content: bytes, suffix: str = ".png") -> str:
-            relative_path = self.inner.save_image_session_generated(session_id, content, suffix=suffix)
+        def save_image_session_generated(self, session_id: str, content: bytes, *, content_type: str) -> str:
+            relative_path = self.inner.save_image_session_generated(
+                session_id,
+                content,
+                content_type=content_type,
+            )
             self.saved_relative_path = relative_path
             task = db_session.get(ImageSessionGenerationTask, task_id)
             assert task is not None
@@ -1312,7 +1318,7 @@ def test_image_session_generation_cancel_after_file_save_does_not_persist_round_
     assert rounds == []
     assert assets == []
     assert storage.saved_relative_path is not None
-    assert not Path(configured_env, storage.saved_relative_path).exists()
+    assert Path(configured_env, storage.saved_relative_path).exists()
 
 
 def test_image_session_generation_cancelled_task_is_not_overwritten_by_late_failure(
@@ -3063,7 +3069,10 @@ def test_image_session_generation_accepts_custom_size_and_rejects_invalid_dimens
     assert oversized.json()["rounds"][-1]["size"] == "2880x2880"
 
 
-def test_image_session_reference_image_can_be_deleted(configured_env: Path, db_session) -> None:
+def test_image_session_reference_image_delete_keeps_unreferenced_storage_object(
+    configured_env: Path,
+    db_session,
+) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
@@ -3092,7 +3101,7 @@ def test_image_session_reference_image_can_be_deleted(configured_env: Path, db_s
 
     db_session.expire_all()
     assert db_session.get(ImageSessionAsset, reference_asset["id"]) is None
-    assert not reference_path.exists()
+    assert reference_path.exists()
 
 
 def test_image_session_can_be_deleted_with_files(configured_env: Path, db_session) -> None:

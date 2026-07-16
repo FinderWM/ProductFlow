@@ -55,13 +55,14 @@ backend/
 │   │   ├── deps.py                      # FastAPI dependencies, including auth/session dependency
 │   │   ├── errors.py                    # shared route-boundary business error to HTTP mapping
 │   │   ├── image_variants.py            # shared image download/variant URL and filename helpers
+│   │   ├── storage_responses.py          # controlled local/stream/signed stored-object responses
 │   │   ├── upload_validation.py         # upload size/MIME/pixel validation
 │   │   ├── routes/                      # APIRouter modules by resource
 │   │   └── schemas/                     # Pydantic DTOs and serializer helpers
 │   └── infrastructure/
 │       ├── db/models.py                 # SQLAlchemy typed declarative models
 │       ├── db/session.py                # engine/session factory dependencies
-│       ├── storage.py                   # LocalStorage and image variants
+│       ├── storage.py                   # active local/S3-compatible storage primitives
 │       ├── queue.py                     # Dramatiq broker and enqueue helpers
 │       ├── text/                        # text provider interfaces/factories/implementations
 │       ├── image/                       # image provider interfaces/factories/implementations
@@ -120,6 +121,8 @@ Put workflow rules and orchestration in `backend/src/inspiration_one_backend/app
 - `application/contracts.py` contains Pydantic contracts shared with providers/renderers, such as
   `InspirationInput`, `CreativeBriefPayload`, `CopyPayloadV2`, and `PosterGenerationInput`.
 - `application/time.py` is the shared application timestamp helper for timezone-aware UTC values.
+- `application/storage_variants.py` owns derived image-variant keys, lookup, generation, distributed locking, and pending
+  fallback selection. Variant existence comes from the active storage backend rather than local paths.
 - `application/queue_submission.py` owns the small shared helper for "durable row persisted, queue delivery failed"
   handling. Submit use cases use it to mark the persisted task failed and raise `QueueUnavailableError`.
 - Inspiration workflow application logic is split by executable boundary:
@@ -186,7 +189,7 @@ rule/contract shapes before applying those rules; SQLAlchemy artifact existence 
 Put adapter code under `backend/src/inspiration_one_backend/infrastructure/`:
 
 - Database models/session setup: `infrastructure/db/models.py`, `infrastructure/db/session.py`.
-- Local file storage and image variants: `infrastructure/storage.py`.
+- Local and S3-compatible persistent storage primitives: `infrastructure/storage.py`.
 - Queue setup and enqueue helpers: `infrastructure/queue.py`.
 - Provider interfaces and factories: `infrastructure/text/base.py`, `infrastructure/text/factory.py`,
   `infrastructure/image/base.py`, `infrastructure/image/factory.py`.

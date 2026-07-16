@@ -644,10 +644,18 @@ def upload_workflow_node_image(
     workflow = inspiration_workflow_graph.get_workflow_or_raise(session, node.workflow_id)
     storage = storage or LocalStorage()
     if node.node_type == WorkflowNodeType.INSPIRATION_CONTEXT:
-        relative_path = storage.save_context_image_upload(workflow.inspiration_id, filename, image_bytes)
+        relative_path = storage.save_context_image_upload(
+            workflow.inspiration_id,
+            image_bytes,
+            content_type=content_type,
+        )
         kind = SourceAssetKind.CONTEXT_IMAGE
     else:
-        relative_path = storage.save_reference_upload(workflow.inspiration_id, filename, image_bytes)
+        relative_path = storage.save_reference_upload(
+            workflow.inspiration_id,
+            image_bytes,
+            content_type=content_type,
+        )
         kind = SourceAssetKind.REFERENCE_IMAGE
     storage_metadata = storage.metadata_for(relative_path)
     asset = SourceAsset(

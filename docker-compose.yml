@@ -18,14 +18,17 @@ services:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
       STORAGE_ROOT: /app/storage
+      STORAGE_TEMP_ROOT: ${STORAGE_TEMP_ROOT:-}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL:-}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       S3_REGION: ${S3_REGION:-us-east-1}
-      LOG_DIR: /app/storage/logs
+      STORAGE_SIGNED_URL_TTL_SECONDS: ${STORAGE_SIGNED_URL_TTL_SECONDS:-300}
+      LOG_DIR: /app/logs/backend
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_MAX_BYTES: ${LOG_MAX_BYTES:-10485760}
       LOG_BACKUP_COUNT: ${LOG_BACKUP_COUNT:-5}
@@ -64,6 +67,7 @@ services:
       # STORAGE_HOST_PATH is host-only. Leave it unset to use the inspiration-one-storage named volume,
       # or set it to an existing production directory such as /home/cot/Inspiration One-release/shared/storage.
       - ${STORAGE_HOST_PATH:-inspiration-one-storage}:/app/storage
+      - inspiration-one-logs:/app/logs
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -90,14 +94,17 @@ services:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
       STORAGE_ROOT: /app/storage
+      STORAGE_TEMP_ROOT: ${STORAGE_TEMP_ROOT:-}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL:-}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       S3_REGION: ${S3_REGION:-us-east-1}
-      LOG_DIR: /app/storage/logs
+      STORAGE_SIGNED_URL_TTL_SECONDS: ${STORAGE_SIGNED_URL_TTL_SECONDS:-300}
+      LOG_DIR: /app/logs/worker
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_MAX_BYTES: ${LOG_MAX_BYTES:-10485760}
       LOG_BACKUP_COUNT: ${LOG_BACKUP_COUNT:-5}
@@ -132,6 +139,7 @@ services:
     volumes:
       # Keep this source identical to inspiration-one-backend so API and worker see the same files at /app/storage.
       - ${STORAGE_HOST_PATH:-inspiration-one-storage}:/app/storage
+      - inspiration-one-logs:/app/logs
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -159,3 +167,4 @@ services:
 
 volumes:
   inspiration-one-storage:
+  inspiration-one-logs:

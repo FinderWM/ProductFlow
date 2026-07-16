@@ -33,7 +33,6 @@ from inspiration_one_backend.infrastructure.db.models import (
 )
 from inspiration_one_backend.infrastructure.deck.pptx_assembler import build_deck_pptx
 from inspiration_one_backend.infrastructure.deck.styles import DEFAULT_DECK_STYLE_KEY, is_valid_deck_style
-from inspiration_one_backend.infrastructure.image.base import infer_extension
 from inspiration_one_backend.infrastructure.queue import enqueue_deck_slide_generation_task
 from inspiration_one_backend.infrastructure.storage import LocalStorage
 from inspiration_one_backend.infrastructure.text.factory import get_text_provider
@@ -535,8 +534,12 @@ def set_deck_slide_material_from_upload(
     slide = get_deck_slide_or_raise(session, slide_id)
     deck = get_deck_or_raise(session, slide.deck_id)
     storage = LocalStorage()
-    suffix = infer_extension(mime_type or "image/png")
-    relative = storage.save_deck_slide_material(deck.id, slide.order_index, content, suffix=suffix)
+    relative = storage.save_deck_slide_material(
+        deck.id,
+        slide.order_index,
+        content,
+        content_type=mime_type or "image/png",
+    )
     meta = storage.metadata_for(relative).as_model_kwargs()
     _apply_material_from_storage(
         slide,
@@ -561,7 +564,7 @@ def set_deck_style_reference_from_upload(
 ) -> Deck:
     deck = get_deck_or_raise(session, deck_id)
     storage = LocalStorage()
-    relative = storage.save_deck_style_reference(deck.id, content, suffix=infer_extension(mime_type or "image/png"))
+    relative = storage.save_deck_style_reference(deck.id, content, content_type=mime_type or "image/png")
     deck.style_reference_asset_id = relative
     deck.style_key = None
     deck.status = DeckStatus.STYLE_CONFIRMED
@@ -604,7 +607,10 @@ def export_deck_pptx(session: Session, deck_id: str) -> Deck:
     for slide in deck.slides:
         if not slide.image_storage_path:
             continue
-        image_bytes = storage.resolve(slide.image_storage_path).read_bytes()
+        image_bytes = storage.read_bytes(
+            slide.image_storage_path,
+            max_bytes=get_runtime_settings().upload_max_image_bytes,
+        )
         notes = slide.speaker_notes if deck.speaker_notes_enabled else None
         items.append((image_bytes, notes))
     if not items:

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Protocol
 
 from inspiration_one_backend.application.contracts import ReferenceImageInput
 from inspiration_one_backend.config import filter_image_tool_options
 from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes
+from inspiration_one_backend.infrastructure.storage import StorageService
 
 
 class StoredImageReference(Protocol):
@@ -20,7 +19,7 @@ class StoredImageReference(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ImageGenerationReferencePayload:
-    source_image: Path | None
+    source_image: ReferenceImageInput | None
     reference_images: list[ReferenceImageInput]
 
 
@@ -53,19 +52,21 @@ def unique_image_generation_references[T: StoredImageReference](references: list
 def build_stored_image_reference_payload(
     references: list[StoredImageReference],
     *,
-    resolve_storage_path: Callable[[str], str | Path],
+    storage: StorageService,
+    max_bytes: int,
 ) -> ImageGenerationReferencePayload:
     unique_references = unique_image_generation_references(references)
     reference_inputs = [
         ReferenceImageInput(
-            path=Path(resolve_storage_path(_storage_key(reference))),
+            bytes_data=storage.read_bytes(_storage_key(reference), max_bytes=max_bytes),
             mime_type=reference.mime_type,
             filename=reference.original_filename,
+            source_key=_storage_key(reference),
         )
         for reference in unique_references
     ]
     return ImageGenerationReferencePayload(
-        source_image=reference_inputs[0].path if reference_inputs else None,
+        source_image=reference_inputs[0] if reference_inputs else None,
         reference_images=reference_inputs,
     )
 

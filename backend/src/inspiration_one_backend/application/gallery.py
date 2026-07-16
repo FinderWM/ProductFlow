@@ -29,8 +29,11 @@ from inspiration_one_backend.infrastructure.db.models import (
     new_id,
     utcnow,
 )
-from inspiration_one_backend.infrastructure.image.base import infer_extension
-from inspiration_one_backend.infrastructure.storage import LocalStorage
+from inspiration_one_backend.infrastructure.storage import (
+    InvalidStorageObjectKey,
+    LocalStorage,
+    StorageObjectNotFound,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -482,10 +485,23 @@ def _get_gallery_entry_by_asset_id(session: Session, image_session_asset_id: str
     )
 
 
-def _read_stored_image_content(stored_object: object, storage: LocalStorage, *, missing_message: str) -> bytes:
+def _copy_stored_image_to_gallery(
+    stored_object: object,
+    storage: LocalStorage,
+    *,
+    owner_user_id: str,
+    mime_type: str | None,
+    missing_message: str,
+) -> str:
+    if not mime_type:
+        raise BusinessValidationError(missing_message)
     try:
-        return storage.resolve(storage.object_key_for(stored_object)).read_bytes()
-    except (OSError, ValueError) as exc:
+        return storage.copy_to_gallery_entry_image(
+            storage.object_key_for(stored_object),
+            owner_user_id,
+            content_type=mime_type,
+        )
+    except (InvalidStorageObjectKey, StorageObjectNotFound, ValueError) as exc:
         raise BusinessValidationError(missing_message) from exc
 
 
@@ -608,21 +624,28 @@ def backfill_gallery_entry_storage(
                 updated += 1
             continue
         try:
-            source_content = _read_stored_image_content(entry, storage, missing_message="画廊图片文件不存在")
+            relative_path = _copy_stored_image_to_gallery(
+                entry,
+                storage,
+                owner_user_id=entry.owner_user_id,
+                mime_type=entry.mime_type,
+                missing_message="画廊图片文件不存在",
+            )
         except BusinessValidationError:
             if entry.asset is None:
                 skipped += 1
                 continue
             try:
-                source_content = _read_stored_image_content(entry.asset, storage, missing_message="画廊图片文件不存在")
+                relative_path = _copy_stored_image_to_gallery(
+                    entry.asset,
+                    storage,
+                    owner_user_id=entry.owner_user_id,
+                    mime_type=entry.mime_type or entry.asset.mime_type,
+                    missing_message="画廊图片文件不存在",
+                )
             except BusinessValidationError:
                 skipped += 1
                 continue
-        relative_path = storage.save_gallery_entry_image(
-            entry.owner_user_id,
-            entry.original_filename or f"gallery-{entry.id}.png",
-            source_content,
-        )
         for key, value in storage.metadata_for(relative_path).as_model_kwargs().items():
             setattr(entry, key, value)
         changed = True
@@ -736,11 +759,12 @@ def save_generated_asset_to_gallery(
         raise NotFoundError("生成记录不存在")
     image_session = asset.session
     storage = storage or LocalStorage()
-    source_content = _read_stored_image_content(asset, storage, missing_message="会话图片文件不存在")
-    relative_path = storage.save_gallery_entry_image(
-        asset.owner_user_id,
-        asset.original_filename or f"gallery-{asset.id}{infer_extension(asset.mime_type)}",
-        source_content,
+    relative_path = _copy_stored_image_to_gallery(
+        asset,
+        storage,
+        owner_user_id=asset.owner_user_id,
+        mime_type=asset.mime_type,
+        missing_message="会话图片文件不存在",
     )
     storage_metadata = storage.metadata_for(relative_path)
     actual_size = _image_size_from_provider_output(round_item.provider_output_json)

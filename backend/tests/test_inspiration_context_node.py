@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import _execute_workflow_queue_inline, _login, _make_demo_image_bytes, _wait_for_workflow_run
+from helpers import (
+    _enable_text_generation_configs_image_understanding,
+    _execute_workflow_queue_inline,
+    _login,
+    _make_demo_image_bytes,
+    _wait_for_workflow_run,
+)
 
 from inspiration_one_backend.infrastructure.db.models import DEFAULT_GENERATION_RESOURCE_GROUP_ID
 
@@ -292,12 +298,13 @@ def test_inspiration_create_rejects_invalid_dynamic_fields_json(configured_env: 
     assert invalid_object.json()["detail"] == "动态信息必须是 JSON 对象"
 
 
-def test_inspiration_context_fields_flow_to_downstream_image_node(configured_env: Path) -> None:
+def test_inspiration_context_fields_flow_to_downstream_image_node(configured_env: Path, db_session) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
+    _enable_text_generation_configs_image_understanding(db_session)
 
     created = client.post(
         "/api/inspirations",

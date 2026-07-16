@@ -174,6 +174,26 @@ def enqueue_image_to_code_job_later(job_id: str, *, delay_ms: int) -> None:
     run_image_to_code_job.send_with_options(args=(job_id,), delay=delay_ms)
 
 
+def enqueue_storage_image_variants(object_key: str) -> None:
+    from inspiration_one_backend.workers import run_storage_image_variants
+
+    get_broker()
+    run_storage_image_variants.send(object_key)
+
+
+def try_enqueue_storage_image_variants(object_key: str) -> bool:
+    try:
+        enqueue_storage_image_variants(object_key)
+    except Exception as exc:
+        logger.warning(
+            "图片变体任务投递失败，不影响原图持久化或读取: object_key=%s error_type=%s",
+            object_key,
+            type(exc).__name__,
+        )
+        return False
+    return True
+
+
 def recover_unfinished_enhance_jobs(
     *,
     reset_stale_running: bool = False,

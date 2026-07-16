@@ -187,7 +187,7 @@ Inspiration One/
 
 ## Quick Start: One-Command Self-Hosting with Docker Compose
 
-This path is for single-machine self-hosted deployment. The default configuration can run the basic flow. After configuring real model providers, persistent storage, and reverse proxy/HTTPS, it can be used as a foundation for small-scale production. The host only needs Docker / Docker Compose; Python, `uv`, Node, `pnpm`, and `just` are not required. Compose builds and starts PostgreSQL, Redis, the backend API, the Dramatiq worker, and the Web static site.
+This path is for single-machine self-hosted deployment. The default configuration can run the basic flow. After configuring real model providers, persistent storage, and reverse proxy/HTTPS, it can be used as a foundation for small-scale production. The host only needs Docker / Docker Compose; Python, `uv`, Node, `pnpm`, and `just` are not required. Compose builds and starts the backend API, Dramatiq worker, and Web static site. PostgreSQL, Redis, and MinIO are shared middleware maintained separately under `/Users/yunlong/project/self/env`.
 
 ### 1. Copy and edit environment variables
 
@@ -200,7 +200,7 @@ At minimum, change these values:
 - `ADMIN_ACCESS_KEY`: admin key used to log in to the backend UI.
 - `SETTINGS_ACCESS_TOKEN`: secondary unlock token for the settings page; it must be different from the login key.
 - `SESSION_SECRET`: long random string used to sign session cookies.
-- `POSTGRES_PASSWORD`: PostgreSQL password; Compose uses it to build the in-container `DATABASE_URL`.
+- `POSTGRES_PASSWORD`: shared PostgreSQL password; it must match the middleware configuration.
 
 The default provider is `mock`, and `POSTER_GENERATION_MODE=template`, so you can complete basic flows such as creating inspirations, generating copy, and rendering template posters without real model keys. Read "Model and Provider Configuration" before switching to real models.
 
@@ -212,25 +212,50 @@ docker compose up -d --build
 
 Do not append service names to this command; adding a service name starts only that service. The complete self-hosted stack should start all services together.
 
-Compose starts these services by default:
+Compose starts these application services by default:
 
-- PostgreSQL: service name `inspiration-one-postgres`, Compose volume `inspiration-one-postgres-data`, host port `${POSTGRES_HOST_PORT:-15432}`.
-- Redis: service name `inspiration-one-redis`, AOF persistence volume `inspiration-one-redis-data`, host port `${REDIS_HOST_PORT:-16379}`.
 - Backend API: service name `inspiration-one-backend`, host port `${APP_HOST_PORT:-29280}`.
-- Dramatiq worker: service name `inspiration-one-worker`, sharing database, Redis, and storage volumes with the API.
+- Dramatiq worker: service name `inspiration-one-worker`, sharing external PostgreSQL and Redis with the API; only the local storage backend shares a business storage volume.
 - Web: service name `inspiration-one-web`, nginx static service, host port `${WEB_PORT:-29281}`.
 
-If a port is already occupied, edit `APP_HOST_PORT`, `WEB_PORT`, `POSTGRES_HOST_PORT`, or `REDIS_HOST_PORT` in `.env`, then run `docker compose up -d --build` again. Containers still connect to one another through service names, so you do not need to change application `DATABASE_URL` / `REDIS_URL`.
+Shared middleware uses `libowpg` on host port `15432`, `libowredis` on `16379`, and `libowminio` on `19000`. If an application port is already occupied, edit `APP_HOST_PORT` or `WEB_PORT` in `.env`, then run the selected Compose command again.
 
-The in-container application uses Compose network service names:
+The application containers use external connection URLs from `.env`. A local-storage configuration looks like this:
 
 ```text
-DATABASE_URL=postgresql+psycopg://inspiration-one:<POSTGRES_PASSWORD>@inspiration-one-postgres:5432/inspiration-one
-REDIS_URL=redis://inspiration-one-redis:6379/0
+DATABASE_URL=postgresql+psycopg://productflow:<POSTGRES_PASSWORD>@host.docker.internal:15432/inspiration_flow
+REDIS_URL=redis://host.docker.internal:16379/0
 STORAGE_ROOT=/app/storage
+STORAGE_BACKEND=local
 ```
 
-At runtime, container `STORAGE_ROOT` is fixed to `/app/storage`; do not write host paths into it. By default, uploaded and generated files are stored in the Docker named volume `inspiration-one-storage` and persist across container restarts.
+Storage behavior is selected by `STORAGE_BACKEND`:
+
+- `local`: `STORAGE_ROOT` is the persistent object root. Compose mounts the `inspiration-one-storage` named volume at `/app/storage`.
+- `minio` and `s3`: the configured S3-compatible bucket is the sole persistent file source. API and worker containers do not mount `/app/storage`.
+
+For MinIO, configure the internal endpoint and credentials in `.env`:
+
+```env
+STORAGE_BACKEND=minio
+S3_ENDPOINT_URL=http://host.docker.internal:19000
+S3_PUBLIC_ENDPOINT_URL=http://localhost:19000
+S3_BUCKET=inspiration-one
+S3_ACCESS_KEY=<MINIO_APP_ACCESS_KEY>
+S3_SECRET_KEY=<MINIO_APP_SECRET_KEY>
+S3_REGION=us-east-1
+STORAGE_SIGNED_URL_TTL_SECONDS=300
+```
+
+`S3_PUBLIC_ENDPOINT_URL` is optional and is used only for short-lived authenticated attachment downloads. Without it, attachments fall back to same-origin backend streaming. Images, Enhance tiles, Deck slide images, and image-to-code previews always use stable same-origin application URLs, so the bucket can remain private. `STORAGE_PUBLIC_BASE_URL` remains a legacy fallback for existing environments.
+
+Object-storage deployments must include the override file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.object-storage.yml up -d --build
+```
+
+The override removes `/app/storage` mounts, sets `STORAGE_TEMP_ROOT=/tmp/inspiration-one-storage`, and preserves the independent log volume. Temporary materialization is request/task scoped and carries no business state. Image variants are stored in object storage and generated asynchronously; pending variant requests return the original image with no-store headers.
 
 When migrating from an older systemd production environment, if you already have a production file directory such as `/home/cot/Inspiration One-release/shared/storage`, set this host-only variable in `.env` to reuse it:
 
@@ -238,7 +263,9 @@ When migrating from an older systemd production environment, if you already have
 STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage
 ```
 
-`STORAGE_HOST_PATH` is only the host path used by the Compose bind mount. API/worker containers still use `STORAGE_ROOT=/app/storage`. If empty or unset, Compose uses the `inspiration-one-storage` named volume. Do not run `docker compose down -v` for normal updates, and do not delete Docker volumes just to switch storage mounts. To return to the named volume, remove `STORAGE_HOST_PATH` and run `docker compose up -d`.
+`STORAGE_HOST_PATH` applies only to the local backend bind mount. API/worker containers still use `STORAGE_ROOT=/app/storage`. If empty or unset, Compose uses the `inspiration-one-storage` named volume. Do not run `docker compose down -v` for normal updates, and do not delete Docker volumes just to switch storage mounts. To return to the named volume, remove `STORAGE_HOST_PATH` and run `docker compose up -d`.
+
+The legacy `backend/backend/storage-dev` directory is outside the current object-storage architecture. No audit, migration, repair, or missing-object recovery path is provided for it.
 
 ### 3. Database migration
 
@@ -286,7 +313,7 @@ docker compose logs -f inspiration-one-backend inspiration-one-worker inspiratio
 docker compose down
 ```
 
-Stopping services does not delete data volumes. Only run this when you are sure you want to clear the database, Redis, and storage:
+Stopping services does not delete data volumes. Only run this when you are sure you want to clear this project's storage and log volumes:
 
 ```bash
 docker compose down -v
@@ -322,15 +349,11 @@ The `DATABASE_URL` / `REDIS_URL` in `.env.example` target the Compose container 
 - `SESSION_SECRET`: long random string used to sign session cookies.
 - `POSTGRES_PASSWORD`: local PostgreSQL password; keep it consistent with the password in `.env.dev`'s `DATABASE_URL`.
 
-`.env.dev.example` uses development ports, Redis DB 1, and `backend/storage-dev`. The database name matches the default `docker-compose.yml`. If you use a separate development database, create it in PostgreSQL first, then adjust `.env.dev`'s `DATABASE_URL`. Local development storage is isolated from production Compose storage: `just backend-run` / `just backend-worker` and their raw equivalents read `STORAGE_ROOT=./backend/storage-dev` from `.env.dev`. Do not start local development processes by shell-sourcing production `.env` or importing production `STORAGE_HOST_PATH`.
+`.env.dev.example` uses development ports, Redis DB 0, the shared `inspiration_flow` database, and `STORAGE_BACKEND=minio`. `scripts/with_dev_env.sh` loads the required `S3_*` values from `/Users/yunlong/project/self/env/minio.env`. MinIO is the sole persistent file source in development object mode; path-only operations use the operating-system temporary directory unless `STORAGE_TEMP_ROOT` is explicitly set. Do not start local development processes by shell-sourcing production `.env` or importing production `STORAGE_HOST_PATH`.
 
 ### 3. Start development dependencies only
 
-For local hot reload, use Compose only for PostgreSQL and Redis. The API, worker, and Web are started by host commands in the next step. The complete self-hosted stack uses `docker compose up -d --build` from the previous section.
-
-```bash
-docker compose up -d inspiration-one-postgres inspiration-one-redis
-```
+For local hot reload, start the shared `libowpg`, `libowredis`, and `libowminio` middleware from `/Users/yunlong/project/self/env`. The API, worker, and Web are started by host commands in the next step.
 
 ### 4. Install dependencies and migrate the database
 
@@ -422,7 +445,7 @@ Prompt templates:
 ## Common Commands
 
 | Purpose | With `just` | Without `just` |
-|---|---|---|
+| --- | --- | --- |
 | Install backend dependencies | `just backend-install` | `uv sync --directory backend --extra dev` |
 | Install frontend dependencies | `just web-install` | `pnpm --dir web install` |
 | Apply development DB migration | `just backend-migrate` | `bash scripts/with_dev_env.sh uv run --directory backend alembic upgrade head` |
@@ -436,9 +459,9 @@ Prompt templates:
 | Release dry run | `just release-dry-run` | `DRY_RUN=1 bash scripts/release.sh` |
 | Production update | `just release` | `bash scripts/release.sh` |
 
-`just release` / `bash scripts/release.sh` is the Docker Compose production update entrypoint. It first runs `docker compose config --quiet`, then attempts to stop legacy user-level systemd services that may occupy ports `29280/29281` (`inspiration-one-backend.service`, `inspiration-one-worker.service`, `inspiration-one-web.service`), then runs `docker compose up -d --build --remove-orphans` and checks backend `/healthz`, web `/healthz`, and web proxy `/api/healthz`. This process does not delete Docker volumes; do not use `docker compose down -v` for normal updates. To reuse files from an old systemd production setup, set `STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage` in `.env` first. If you have already manually moved old services away, you can temporarily run `LEGACY_SYSTEMD_ACTION=skip bash scripts/release.sh`, or `LEGACY_SYSTEMD_ACTION=skip just release`.
+`just release` / `bash scripts/release.sh` is the Docker Compose production update entrypoint. It reads `STORAGE_BACKEND` from `.env`: local uses `docker-compose.yml`, while minio/s3 automatically add `docker-compose.object-storage.yml`. It validates the selected Compose configuration and storage-mount contract, attempts to stop legacy user-level systemd services that may occupy ports `29280/29281`, rebuilds the stack, and checks backend `/healthz`, web `/healthz`, and web proxy `/api/healthz`. This process does not delete Docker volumes; do not use `docker compose down -v` for normal updates. Local deployments that reuse files from an old systemd setup may set `STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage`. If you have already moved old services away, use `LEGACY_SYSTEMD_ACTION=skip bash scripts/release.sh` or `LEGACY_SYSTEMD_ACTION=skip just release`.
 
-`just release-dry-run` / `DRY_RUN=1 bash scripts/release.sh` only validates Compose configuration and prints the steps a real release would execute. It does not stop systemd services, build images, start containers, or switch running services.
+`just release-dry-run` / `DRY_RUN=1 bash scripts/release.sh` validates the Compose file set selected by `STORAGE_BACKEND` and prints the exact commands. It does not stop systemd services, build images, start containers, or switch running services.
 
 ## Main API Resources
 

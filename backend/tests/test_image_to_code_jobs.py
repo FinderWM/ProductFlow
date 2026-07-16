@@ -56,7 +56,7 @@ def test_image_to_code_job_lifecycle_succeeds(db_session) -> None:
     preview_image = next(
         artifact for artifact in saved.result_manifest_json["artifacts"] if artifact["type"] == "preview_image"
     )
-    assert LocalStorage().resolve(preview_image["storage_key"]).exists()
+    assert LocalStorage().stat(preview_image["storage_key"]).content_length > 0
 
 
 def test_image_to_code_job_cancel_and_retry_create_new_job(db_session, monkeypatch) -> None:

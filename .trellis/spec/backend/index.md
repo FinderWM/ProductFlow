@@ -15,12 +15,13 @@ These files document the backend conventions that are actually present in this r
 ## Guidelines Index
 
 | Guide | Description | Status |
-|-------|-------------|--------|
+| ------- | ------------- | -------- |
 | [Directory Structure](./directory-structure.md) | FastAPI/application/domain/infrastructure layout and file placement | Filled |
 | [Database Guidelines](./database-guidelines.md) | SQLAlchemy models, sessions, Alembic migrations, runtime settings | Filled |
 | [Error Handling](./error-handling.md) | ValueError-to-HTTP mapping, upload errors, auth, queue/provider boundaries | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Ruff/pytest tooling, tests, required/forbidden backend patterns | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Current minimal logging reality and safe logging extension rules | Filled |
+| [Object Storage Source-of-Truth](./object-storage.md) | Active backend, bounded reads, scoped temp files, variants, downloads, and Compose contracts | Filled |
 | [Realtime Task Notifications](./realtime-task-notifications.md) | WebSocket + Redis pub/sub task-result notification contract | Filled |
 | [Inspiration Workbench DAG](./inspiration-workflow-dag.md) | Canvas/workflow DAG templates, validation, and user-template contracts | Filled |
 | [Deck (PPT) Generation](./deck-generation.md) | Deck/DeckSlide schema, generation pipeline, image capacity pool, RBAC, runtime config, pptx export | Filled |
@@ -42,7 +43,7 @@ Use this map when the change is feature-driven rather than file-driven:
 - Queue/status snapshots or task-result notifications: read `./quality-guidelines.md` and
   `./realtime-task-notifications.md`.
 - Storage-backed uploads, generated files, downloads, or object metadata: read `./database-guidelines.md`,
-  `./error-handling.md`, and `./directory-structure.md`.
+  `./error-handling.md`, `./directory-structure.md`, and `./object-storage.md`.
 - Inspiration workbench DAG, canvas templates, workflow nodes/edges, or user templates: read
   `./inspiration-workflow-dag.md`.
 - Deck/PPT generation (deck schema, outline/style/batch generation, image capacity pool, deck RBAC, deck
@@ -67,6 +68,7 @@ Before backend changes, read:
    - API/business failures/uploads: `./error-handling.md`
    - observability/logging: `./logging-guidelines.md`
    - realtime task-result notifications: `./realtime-task-notifications.md`
+   - stored objects, downloads, image variants, or storage deployment: `./object-storage.md`
    - inspiration workbench DAG: `./inspiration-workflow-dag.md`
 
 If a backend change affects frontend API contracts, also read `../frontend/type-safety.md` and

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.moderation import ensure_resource_usable
@@ -27,9 +26,8 @@ from inspiration_one_backend.application.resource_library import (
 )
 from inspiration_one_backend.domain.enums import ResourceLibrarySourceType
 from inspiration_one_backend.infrastructure.db.models import AuthUser, ResourceLibraryAsset
-from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage
+from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage, StorageError
 from inspiration_one_backend.presentation.deps import get_session, require_authenticated
-from inspiration_one_backend.presentation.image_variants import build_variant_filename
 from inspiration_one_backend.presentation.schemas.image_sessions import (
     ImageSessionDetailResponse,
     serialize_image_session_detail,
@@ -54,6 +52,7 @@ from inspiration_one_backend.presentation.schemas.resource_library import (
     serialize_resource_library_asset,
     serialize_resource_library_group,
 )
+from inspiration_one_backend.presentation.storage_responses import image_storage_object, raise_storage_response_error
 from inspiration_one_backend.presentation.upload_validation import (
     read_validated_image_upload,
     validate_reference_image_count,
@@ -252,6 +251,7 @@ def load_resource_library_asset_to_image_session_endpoint(
 @router.get("/assets/{asset_id}/download")
 def download_resource_library_asset_endpoint(
     asset_id: str,
+    request: Request,
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_authenticated),
@@ -261,17 +261,18 @@ def download_resource_library_asset_endpoint(
         raise HTTPException(status_code=404, detail="资源不存在")
     ensure_resource_usable(asset)
     storage = LocalStorage()
-    object_key = storage.object_key_for(asset)
     try:
-        path, media_type = storage.resolve_for_variant(
+        object_key = storage.object_key_for(asset)
+        return image_storage_object(
+            storage,
             object_key,
-            variant,
+            variant=variant,
+            range_header=request.headers.get("range"),
+            filename=asset.original_filename,
             fallback_media_type=asset.mime_type,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="资源文件不存在") from exc
-    filename = build_variant_filename(asset.original_filename, variant=variant, resolved_suffix=path.suffix)
-    return FileResponse(path, media_type=media_type, filename=filename)
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="资源文件不存在")
 
 
 def _serialize_source_status(status_item: ResourceLibrarySourceStatus) -> ResourceLibrarySourceStatusResponse:

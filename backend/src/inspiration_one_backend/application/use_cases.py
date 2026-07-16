@@ -498,7 +498,11 @@ def create_inspiration(
     original_source_asset: SourceAsset | None = None
     if image_bytes is not None:
         resolved_filename = filename or "upload.bin"
-        relative_path = storage.save_inspiration_upload(inspiration.id, resolved_filename, image_bytes)
+        relative_path = storage.save_inspiration_upload(
+            inspiration.id,
+            image_bytes,
+            content_type=content_type or "application/octet-stream",
+        )
         storage_metadata = storage.metadata_for(relative_path)
         original_source_asset = SourceAsset(
             inspiration_id=inspiration.id,
@@ -536,7 +540,11 @@ def create_inspiration(
         session.add(context_document_asset)
         session.flush()
     for reference_bytes, reference_filename, reference_content_type in reference_image_uploads or []:
-        reference_path = storage.save_reference_upload(inspiration.id, reference_filename, reference_bytes)
+        reference_path = storage.save_reference_upload(
+            inspiration.id,
+            reference_bytes,
+            content_type=reference_content_type,
+        )
         storage_metadata = storage.metadata_for(reference_path)
         session.add(
             SourceAsset(
@@ -608,7 +616,11 @@ def add_reference_images(
     ensure_resource_usable(inspiration)
     storage = storage or LocalStorage()
     for reference_bytes, reference_filename, reference_content_type in reference_image_uploads:
-        reference_path = storage.save_reference_upload(inspiration.id, reference_filename, reference_bytes)
+        reference_path = storage.save_reference_upload(
+            inspiration.id,
+            reference_bytes,
+            content_type=reference_content_type,
+        )
         storage_metadata = storage.metadata_for(reference_path)
         session.add(
             SourceAsset(

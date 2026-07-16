@@ -8,6 +8,7 @@ from inspiration_one_backend.application.enhance.execution import (
     EnhanceExecutionRequest,
     execute_enhance_execution,
 )
+from inspiration_one_backend.application.enhance.limits import ENHANCE_FINAL_MAX_UPLOAD_BYTES
 from inspiration_one_backend.application.enhance.strategy import (
     DirectParams,
     TiledParams,
@@ -66,7 +67,10 @@ def execute_workflow_image_enhance(
     config = normalize_image_enhance_config(node.config_json)
     source = _select_source_asset(session, workflow=workflow, node=node)
     storage = LocalStorage()
-    source_bytes = storage.resolve(storage.object_key_for(source)).read_bytes()
+    source_bytes = storage.read_bytes(
+        storage.object_key_for(source),
+        max_bytes=ENHANCE_FINAL_MAX_UPLOAD_BYTES,
+    )
     source_dimensions = image_dimensions_from_bytes(source_bytes)
     if source_dimensions is None:
         raise WorkflowSafeExecutionError(
@@ -186,7 +190,9 @@ def _create_enhanced_source_asset(
     final_ref: str,
     fallback_mime: str,
 ) -> SourceAsset:
-    _final_path, mime_type = storage.resolve_for_variant(final_ref, "original", fallback_media_type=fallback_mime)
+    mime_type = storage.stat(final_ref).content_type
+    if not mime_type.startswith("image/"):
+        mime_type = fallback_mime
     asset = SourceAsset(
         inspiration_id=workflow.inspiration_id,
         kind=SourceAssetKind.REFERENCE_IMAGE,

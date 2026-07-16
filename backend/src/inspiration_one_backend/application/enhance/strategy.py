@@ -9,9 +9,11 @@ from math import ceil
 from PIL import Image, ImageOps
 from sqlalchemy.orm import Session
 
-from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes, infer_extension
+from inspiration_one_backend.infrastructure.image.base import image_dimensions_from_bytes
 from inspiration_one_backend.infrastructure.image.chat_service import ImageChatService
 from inspiration_one_backend.infrastructure.storage import LocalStorage
+
+from .limits import ENHANCE_FINAL_MAX_UPLOAD_BYTES
 
 DEFAULT_ENHANCE_PROMPT = "在保持主体与构图不变的前提下，提升清晰度、细节与画质。"
 TILED_ENHANCE_PROMPT_TEMPLATE = """请对【附图 2】进行超分辨率增强。
@@ -109,7 +111,7 @@ def run_direct_strategy(ctx: EnhanceContext, params: DirectParams) -> EnhanceRes
     storage_key = ctx.storage.save_enhance_final(
         ctx.output_prefix,
         result.bytes_data,
-        suffix=infer_extension(result.mime_type),
+        content_type=result.mime_type,
     )
     _emit_progress(ctx, 1, 1)
     tile = EnhanceTile(
@@ -194,7 +196,7 @@ def run_tiled_strategy(ctx: EnhanceContext, params: TiledParams, *, backend_stit
                 row,
                 col,
                 normalized_bytes,
-                suffix=infer_extension(result.mime_type),
+                content_type=result.mime_type,
             )
             tiles.append(
                 EnhanceTile(
@@ -260,15 +262,15 @@ def run_tiled_strategy(ctx: EnhanceContext, params: TiledParams, *, backend_stit
 def stitch_tiles(ctx: EnhanceContext, tiles: list[EnhanceTile], *, final_width: int, final_height: int) -> str:
     canvas = Image.new("RGBA", (final_width, final_height), (0, 0, 0, 0))
     for tile in tiles:
-        tile_path = ctx.storage.resolve(tile.storage_key)
-        with Image.open(tile_path) as opened:
+        tile_bytes = ctx.storage.read_bytes(tile.storage_key, max_bytes=ENHANCE_FINAL_MAX_UPLOAD_BYTES)
+        with Image.open(BytesIO(tile_bytes)) as opened:
             image = ImageOps.exif_transpose(opened).convert("RGBA")
             if image.size != (tile.target_width, tile.target_height):
                 image = image.resize((tile.target_width, tile.target_height), Image.Resampling.LANCZOS)
             canvas.alpha_composite(image, (tile.target_x, tile.target_y))
     output = BytesIO()
     canvas.save(output, format="PNG")
-    return ctx.storage.save_enhance_final(ctx.output_prefix, output.getvalue(), suffix=".png")
+    return ctx.storage.save_enhance_final(ctx.output_prefix, output.getvalue(), content_type="image/png")
 
 
 def _validate_direct_params(params: DirectParams) -> None:

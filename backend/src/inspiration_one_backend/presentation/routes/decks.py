@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application import decks as deck_use_cases
@@ -27,7 +27,7 @@ from inspiration_one_backend.domain.errors import NotFoundError
 from inspiration_one_backend.domain.rbac import API_DECK_GENERATE, API_DECK_READ, API_DECK_WRITE
 from inspiration_one_backend.infrastructure.db.models import AuthUser
 from inspiration_one_backend.infrastructure.deck.styles import list_deck_styles
-from inspiration_one_backend.infrastructure.storage import LocalStorage
+from inspiration_one_backend.infrastructure.storage import LocalStorage, StorageError
 from inspiration_one_backend.presentation.deps import get_session, require_api_permission
 from inspiration_one_backend.presentation.schemas.decks import (
     CreateDeckRequest,
@@ -45,6 +45,11 @@ from inspiration_one_backend.presentation.schemas.decks import (
     serialize_deck,
     serialize_deck_slide,
     serialize_deck_summary,
+)
+from inspiration_one_backend.presentation.storage_responses import (
+    download_storage_object,
+    image_storage_object,
+    raise_storage_response_error,
 )
 
 router = APIRouter(prefix="/api", tags=["decks"])
@@ -273,27 +278,45 @@ async def generate_deck_slide_speaker_notes_endpoint(
 @router.get("/deck-slides/{slide_id}/image")
 async def download_deck_slide_image_endpoint(
     slide_id: str,
+    request: Request,
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_READ)),
-) -> FileResponse:
+) -> Response:
     slide = get_deck_slide_or_raise(session, slide_id)
-    if not slide.image_storage_path:
+    object_key = slide.image_storage_object_key or slide.image_storage_path
+    if not object_key:
         raise NotFoundError("幻灯片尚未生成图片")
-    path = LocalStorage().resolve(slide.image_storage_path)
-    return FileResponse(path, media_type=slide.image_mime_type or "image/png")
+    try:
+        return image_storage_object(
+            LocalStorage(),
+            object_key,
+            range_header=request.headers.get("range"),
+            fallback_media_type=slide.image_mime_type or "image/png",
+        )
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="幻灯片图片文件不存在")
 
 
 @router.get("/deck-slides/{slide_id}/material")
 async def download_deck_slide_material_endpoint(
     slide_id: str,
+    request: Request,
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_READ)),
-) -> FileResponse:
+) -> Response:
     slide = get_deck_slide_or_raise(session, slide_id)
-    if not slide.material_storage_path:
+    object_key = slide.material_storage_object_key or slide.material_storage_path
+    if not object_key:
         raise NotFoundError("幻灯片没有配图")
-    path = LocalStorage().resolve(slide.material_storage_path)
-    return FileResponse(path, media_type=slide.material_mime_type or "image/png")
+    try:
+        return image_storage_object(
+            LocalStorage(),
+            object_key,
+            range_header=request.headers.get("range"),
+            fallback_media_type=slide.material_mime_type or "image/png",
+        )
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="幻灯片配图文件不存在")
 
 
 @router.post("/decks/{deck_id}/export", response_model=DeckResponse)
@@ -309,18 +332,24 @@ async def export_deck_endpoint(
 @router.get("/decks/{deck_id}/pptx")
 async def download_deck_pptx_endpoint(
     deck_id: str,
+    request: Request,
     session: Session = Depends(get_session),
     _current_user: AuthUser = Depends(require_api_permission(API_DECK_READ)),
-) -> FileResponse:
+) -> Response:
     deck = get_deck_or_raise(session, deck_id)
-    if not deck.pptx_storage_path:
+    object_key = deck.pptx_storage_object_key or deck.pptx_storage_path
+    if not object_key:
         raise NotFoundError("演示文稿尚未导出")
-    path = LocalStorage().resolve(deck.pptx_storage_path)
-    return FileResponse(
-        path,
-        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        filename=f"{deck.title}.pptx",
-    )
+    try:
+        return download_storage_object(
+            LocalStorage(),
+            object_key,
+            filename=f"{deck.title}.pptx",
+            range_header=request.headers.get("range"),
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="演示文稿文件不存在")
 
 
 @router.post("/deck-slides/{slide_id}/resource-library", status_code=status.HTTP_204_NO_CONTENT)

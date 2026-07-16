@@ -62,7 +62,7 @@ def _restore_logging_state() -> Iterator[None]:
             logger.propagate = saved_propagate
 
 
-def test_default_log_dir_uses_backend_storage_when_running_from_backend(
+def test_default_log_dir_is_isolated_from_backend_storage_when_running_from_backend(
     configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -75,8 +75,8 @@ def test_default_log_dir_uses_backend_storage_when_running_from_backend(
 
     settings = get_settings()
 
-    assert settings.log_dir == backend_dir / "storage" / "logs"
-    assert get_log_file_path(settings) == backend_dir / "storage" / "logs" / "inspiration-one.log"
+    assert settings.log_dir == backend_dir / "logs"
+    assert get_log_file_path(settings) == backend_dir / "logs" / "inspiration-one.log"
 
 
 def test_log_cleanup_deletes_expired_persistent_logs(

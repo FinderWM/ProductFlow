@@ -207,7 +207,7 @@ def test_enhance_job_api_attaches_result_to_image_session(
     source_path = storage.save_image_session_generated(
         image_session.id,
         _make_demo_image_bytes_with_size(160, 120),
-        suffix=".png",
+        content_type="image/png",
     )
     source_asset = ImageSessionAsset(
         owner_user_id=ADMIN_USER_ID,
@@ -238,7 +238,7 @@ def test_enhance_job_api_attaches_result_to_image_session(
     final_ref = storage.save_enhance_final(
         f"enhance/{job.id}",
         _make_demo_image_bytes_with_size(320, 240),
-        suffix=".png",
+        content_type="image/png",
     )
     job.result_manifest_json = {
         "strategy": "direct",

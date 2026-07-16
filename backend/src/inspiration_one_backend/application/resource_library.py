@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -37,7 +37,11 @@ from inspiration_one_backend.infrastructure.db.models import (
     SourceAsset,
 )
 from inspiration_one_backend.infrastructure.image.base import infer_extension
-from inspiration_one_backend.infrastructure.storage import LocalStorage
+from inspiration_one_backend.infrastructure.storage import (
+    InvalidStorageObjectKey,
+    LocalStorage,
+    StorageObjectNotFound,
+)
 
 DEFAULT_RESOURCE_LIBRARY_GROUP_NAME = "默认分组"
 SOURCE_ASSET_IMAGE_KINDS = frozenset(
@@ -86,14 +90,16 @@ class _SourceImage:
     storage_object: object
 
 
-def _read_resource_library_asset_content(asset: ResourceLibraryAsset, storage: LocalStorage) -> bytes:
-    return _read_stored_object_content(asset, storage, missing_message="资源文件不存在")
-
-
-def _read_stored_object_content(stored_object: object, storage: LocalStorage, *, missing_message: str) -> bytes:
+def _copy_stored_object(
+    stored_object: object,
+    storage: LocalStorage,
+    *,
+    copy_to: Callable[[str], str],
+    missing_message: str,
+) -> str:
     try:
-        return storage.resolve(storage.object_key_for(stored_object)).read_bytes()
-    except (OSError, ValueError) as exc:
+        return copy_to(storage.object_key_for(stored_object))
+    except (InvalidStorageObjectKey, StorageObjectNotFound) as exc:
         raise BusinessValidationError(missing_message) from exc
 
 
@@ -321,11 +327,19 @@ def backfill_resource_library_asset_storage(
         if (asset.storage_path or "").startswith("resource_library/"):
             continue
         try:
-            content = _read_resource_library_asset_content(asset, storage)
+            relative_path = _copy_stored_object(
+                asset,
+                storage,
+                copy_to=lambda source_key, asset=asset: storage.copy_to_resource_library_asset(
+                    source_key,
+                    asset.owner_user_id,
+                    content_type=asset.mime_type,
+                ),
+                missing_message="资源文件不存在",
+            )
         except BusinessValidationError:
             skipped += 1
             continue
-        relative_path = storage.save_resource_library_asset(asset.owner_user_id, asset.original_filename, content)
         for key, value in storage.metadata_for(relative_path).as_model_kwargs().items():
             setattr(asset, key, value)
         asset.updated_at = now_utc()
@@ -380,11 +394,15 @@ def save_resource_library_asset_from_source(
         )
 
     storage = storage or LocalStorage()
-    source_content = _read_stored_object_content(source.storage_object, storage, missing_message="资源文件不存在")
-    relative_path = storage.save_resource_library_asset(
-        actor_user_id,
-        source.filename,
-        source_content,
+    relative_path = _copy_stored_object(
+        source.storage_object,
+        storage,
+        copy_to=lambda source_key: storage.copy_to_resource_library_asset(
+            source_key,
+            actor_user_id,
+            content_type=source.mime_type,
+        ),
+        missing_message="资源文件不存在",
     )
     storage_metadata = storage.metadata_for(relative_path)
     asset = ResourceLibraryAsset(
@@ -450,7 +468,11 @@ def upload_resource_library_assets(
     storage = storage or LocalStorage()
     asset_ids: list[str] = []
     for upload in uploads:
-        relative_path = storage.save_resource_library_asset(actor_user_id, upload.filename, upload.content)
+        relative_path = storage.save_resource_library_asset(
+            actor_user_id,
+            upload.content,
+            content_type=upload.mime_type,
+        )
         storage_metadata = storage.metadata_for(relative_path)
         asset = ResourceLibraryAsset(
             owner_user_id=actor_user_id,
@@ -521,11 +543,25 @@ def copy_resource_library_asset_to_inspiration_source_asset(
         raise BusinessValidationError("只能加载图片资源")
 
     storage = storage or LocalStorage()
-    content = _read_resource_library_asset_content(asset, storage)
-    relative_path = (
-        storage.save_inspiration_upload(inspiration_id, asset.original_filename, content)
-        if kind == SourceAssetKind.ORIGINAL_IMAGE
-        else storage.save_reference_upload(inspiration_id, asset.original_filename, content)
+
+    def copy_to(source_key: str) -> str:
+        if kind == SourceAssetKind.ORIGINAL_IMAGE:
+            return storage.copy_to_inspiration_upload(
+                source_key,
+                inspiration_id,
+                content_type=asset.mime_type,
+            )
+        return storage.copy_to_reference_upload(
+            source_key,
+            inspiration_id,
+            content_type=asset.mime_type,
+        )
+
+    relative_path = _copy_stored_object(
+        asset,
+        storage,
+        copy_to=copy_to,
+        missing_message="资源文件不存在",
     )
     storage_metadata = storage.metadata_for(relative_path)
     source_asset = SourceAsset(
@@ -607,8 +643,16 @@ def load_resource_library_asset_to_image_session(
         raise BusinessValidationError("只能加载自己的资源")
 
     storage = storage or LocalStorage()
-    content = _read_resource_library_asset_content(asset, storage)
-    relative_path = storage.save_image_session_reference(image_session.id, asset.original_filename, content)
+    relative_path = _copy_stored_object(
+        asset,
+        storage,
+        copy_to=lambda source_key: storage.copy_to_image_session_reference(
+            source_key,
+            image_session.id,
+            content_type=asset.mime_type,
+        ),
+        missing_message="资源文件不存在",
+    )
     storage_metadata = storage.metadata_for(relative_path)
     session.add(
         ImageSessionAsset(

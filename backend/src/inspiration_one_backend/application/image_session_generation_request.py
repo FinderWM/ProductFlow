@@ -113,7 +113,7 @@ def provider_output_with_actual_size(
 
 
 def _session_data_url(storage: LocalStorage, path: str, mime_type: str) -> str:
-    raw = storage.resolve(path).read_bytes()
+    raw = storage.read_bytes(path, max_bytes=get_runtime_settings().upload_max_image_bytes)
     encoded = b64encode(raw).decode("utf-8")
     return f"data:{mime_type};base64,{encoded}"
 

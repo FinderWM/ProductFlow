@@ -6,24 +6,24 @@
 
 ## 1. 系统概览
 
-Inspiration One 由前端、后端 API、后台 worker、PostgreSQL、Redis 和本地文件存储组成：
+Inspiration One 由前端、后端 API、后台 worker、PostgreSQL、Redis 和活动存储后端组成：
 
 ```text
 React/Vite web
   -> FastAPI backend
     -> PostgreSQL metadata
     -> Redis/Dramatiq queue
-    -> local storage files
+    -> local filesystem or MinIO/S3 object storage
     -> text provider / image provider
   -> Dramatiq worker
     -> same database, queue, storage and providers
 ```
 
-默认自托管路径由根目录 `docker-compose.yml` 驱动。`docker compose up -d --build` 会构建并启动 FastAPI 后端、Dramatiq worker 和 nginx-served Web 静态站点；API/worker 通过 `.env` 中的 `DATABASE_URL` / `REDIS_URL` 连接 `/Users/yunlong/project/self/env` 维护的共享 PostgreSQL 容器 `libowpg` 和 Redis 容器 `libowredis`，并通过 `STORAGE_BACKEND` 切换本地存储或共享对象存储。`STORAGE_BACKEND=local` 时共享挂载到容器 `/app/storage` 的持久化 storage，未设置 `STORAGE_HOST_PATH` 时使用 Docker named volume `inspiration-one-storage`；迁移旧 systemd 生产环境时，可以设置 host-only 变量 `STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage` 将既有宿主机 storage 目录 bind-mount 到 `/app/storage`，容器运行时仍保持 `STORAGE_ROOT=/app/storage`。`STORAGE_BACKEND=minio` 或 `STORAGE_BACKEND=s3` 时，API/worker 使用 S3 兼容对象存储，`STORAGE_ROOT` 只承担本地缓存和缩略图派生。后端容器启动时先执行 Alembic 迁移，再启动 `uvicorn`。
+默认自托管路径由根目录 `docker-compose.yml` 驱动。`docker compose up -d --build` 会构建并启动 FastAPI 后端、Dramatiq worker 和 nginx-served Web 静态站点；API/worker 通过 `.env` 中的 `DATABASE_URL` / `REDIS_URL` 连接 `/Users/yunlong/project/self/env` 维护的共享 PostgreSQL 容器 `libowpg` 和 Redis 容器 `libowredis`，并通过 `STORAGE_BACKEND` 选择活动存储后端。local 模式共享挂载 `/app/storage`，未设置 `STORAGE_HOST_PATH` 时使用 Docker named volume `inspiration-one-storage`。minio/s3 模式加载 `docker-compose.object-storage.yml`，移除 API/worker 的业务 storage 挂载，并将 `STORAGE_TEMP_ROOT` 设置为非持久的 `/tmp/inspiration-one-storage`。日志通过 `inspiration-one-logs` 独立持久化，API 和 worker 使用不同子目录。后端容器启动时先执行 Alembic 迁移，再启动 `uvicorn`。
 
-生产更新入口是 `just release`，底层调用 `scripts/release.sh` 执行 Compose 配置校验、停止 legacy user-level systemd 服务（`inspiration-one-backend.service`、`inspiration-one-worker.service`、`inspiration-one-web.service`，用于释放旧发布占用的 29280/29281 端口）、`docker compose up -d --build --remove-orphans` 和 HTTP health checks。`just release-dry-run` 只做配置校验与计划输出，不停止旧服务、不构建、不启动容器。普通更新不会删除 Docker volumes。
+生产更新入口是 `just release`。`scripts/release.sh` 根据 `.env` 中的 `STORAGE_BACKEND` 选择 base Compose 或 base + object-storage override，并验证对象模式不存在 `/app/storage` 挂载。后续步骤包括停止 legacy user-level systemd 服务、重建应用栈和 HTTP health checks。`just release-dry-run` 校验相同文件组合并输出实际命令，不停止旧服务、不构建、不启动容器。普通更新不会删除 Docker volumes。
 
-本地热重载开发仍由根目录 `justfile` 驱动：共享中间件 `libowpg`、`libowredis` 和 `libowminio` 运行后，API、worker、前端分别由 `just backend-run`、`just backend-worker`、`just web-dev` 启动。开发环境使用 `.env.dev` 中的 `STORAGE_BACKEND=minio` 和 `STORAGE_ROOT=./backend/storage-dev`，其中 `STORAGE_ROOT` 只作为本地缓存目录；脚本会从 `/Users/yunlong/project/self/env/minio.env` 注入 `S3_*` 配置。不要通过 shell-sourcing 生产 `.env` 来启动本地开发进程。
+本地热重载开发仍由根目录 `justfile` 驱动：共享中间件 `libowpg`、`libowredis` 和 `libowminio` 运行后，API、worker、前端分别由 `just backend-run`、`just backend-worker`、`just web-dev` 启动。开发对象模式使用 `.env.dev` 中的 `STORAGE_BACKEND=minio`，脚本从 `/Users/yunlong/project/self/env/minio.env` 注入 `S3_*` 配置；MinIO 是唯一持久化文件真源，临时物化默认使用操作系统临时目录。不要通过 shell-sourcing 生产 `.env` 来启动本地开发进程。
 
 ## 2. 后端分层
 
@@ -207,9 +207,15 @@ Secret 类配置在 API 响应中不回显已有值。
 
 ## 9. 文件存储与下载
 
-`infrastructure/storage.py` 里的 `StorageService` 是存储门面，`LocalStorage` 保留为兼容别名。`STORAGE_BACKEND=local` 时对象直接落到 `STORAGE_ROOT`；`STORAGE_BACKEND=minio` 或 `STORAGE_BACKEND=s3` 时通过 S3 兼容后端写入对象存储，并把对象缓存到 `STORAGE_ROOT` 供下载和缩略图派生。`STORAGE_HOST_PATH` 只控制宿主机 bind mount 来源，不应传入应用逻辑替代 `STORAGE_ROOT`。
+`infrastructure/storage.py` 里的 `StorageService` 是存储门面，`LocalStorage` 保留为兼容别名。一个进程只使用 `STORAGE_BACKEND` 选定的活动后端。local 模式将对象持久化到 `STORAGE_ROOT`；minio/s3 模式将对象存储作为唯一持久化真源，不创建、读取或写回服务端业务缓存，也不从本地同名文件回退。`STORAGE_ROOT` 和 `STORAGE_HOST_PATH` 只属于 local 后端。
 
-图片资源表不保存完整访问 URL，只保存对象身份字段：`storage_backend`、`storage_bucket`、`storage_object_key`。历史 `storage_path` 保留为兼容字段，读取时优先使用 `storage_object_key`，为空时回退到 `storage_path`。列表、画廊和连续生图页面由 API 在响应阶段按当前存储配置动态拼接 MinIO/S3 URL；本地存储或缺少公共访问配置时继续使用后端下载接口。
+普通业务读取使用带上限的 bytes 接口或可关闭的 stream；仅当第三方库明确要求真实路径时，`materialize()` 才在 `STORAGE_TEMP_ROOT` 或操作系统临时目录创建作用域内文件，并在退出时清理。纯对象归属复制使用后端 `copy_object()`，不经过 API/worker 内存中转。业务清理只处理数据库状态和关联，不物理删除对象；无引用对象交由存储生命周期策略或独立受控清理流程处理。
+
+图片资源表不保存完整访问 URL，只保存对象身份字段：`storage_backend`、`storage_bucket`、`storage_object_key`。历史 `storage_path` 保留为兼容字段，读取时优先使用 `storage_object_key`，为空时回退到 `storage_path`。API DTO 始终返回稳定应用内 URL。图片、Enhance 切片、Deck 页面图和图片转代码预览由后端同源代理；明确的非图片附件在鉴权后可使用 `S3_PUBLIC_ENDPOINT_URL` 生成短时签名 URL，未配置时回退为同源流式响应。受控响应支持单段 Range、统一安全头和远端流关闭。
+
+图片 preview/thumbnail 是活动存储后端中的派生对象，由后台幂等任务异步生成。请求发现变体缺失时补投任务并返回原图，同时设置 `Cache-Control: no-store` 和 `X-Image-Variant: pending`。读取顺序兼容 canonical WebP 和历史 JPG key。
+
+旧 `backend/backend/storage-dev` 不参与该架构，不提供审计、迁移、修复或缺失对象恢复流程。
 
 用户可下载的文件通过受控路由读取，例如：
 

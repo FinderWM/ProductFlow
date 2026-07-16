@@ -8,7 +8,7 @@ from pathlib import Path
 import itsdangerous.timed
 import pytest
 from fastapi.testclient import TestClient
-from helpers import _login
+from helpers import _login, _make_demo_image_bytes
 from sqlalchemy import select
 
 from inspiration_one_backend.config import (
@@ -2202,7 +2202,10 @@ def test_chat_completions_generation_config_round_trips_structured_json_response
     )
     assert generation_config.status_code == 200
     payload = generation_config.json()
-    assert payload["config"] == {"structured_output": {"enabled": True, "mode": "json_object"}}
+    assert payload["config"] == {
+        "structured_output": {"enabled": True, "mode": "json_object"},
+        "supports_image_understanding": False,
+    }
 
     text_config = resolve_text_provider_config(generation_config_id=payload["id"])
     assert text_config.provider_kind == "openai_chat_completions"
@@ -2215,7 +2218,10 @@ def test_chat_completions_generation_config_round_trips_structured_json_response
     exported_generation_config = next(
         item for item in exported.json()["generation_configs"] if item["id"] == payload["id"]
     )
-    assert exported_generation_config["config"] == {"structured_output": {"enabled": True, "mode": "json_object"}}
+    assert exported_generation_config["config"] == {
+        "structured_output": {"enabled": True, "mode": "json_object"},
+        "supports_image_understanding": False,
+    }
 
 
 def test_responses_generation_config_round_trips_structured_output(
@@ -2259,7 +2265,10 @@ def test_responses_generation_config_round_trips_structured_output(
     )
     assert generation_config.status_code == 200
     payload = generation_config.json()
-    assert payload["config"] == {"structured_output": {"enabled": True, "mode": "json_schema"}}
+    assert payload["config"] == {
+        "structured_output": {"enabled": True, "mode": "json_schema"},
+        "supports_image_understanding": False,
+    }
 
     text_config = resolve_text_provider_config(generation_config_id=payload["id"])
     assert text_config.provider_kind == "openai"
@@ -2272,7 +2281,10 @@ def test_responses_generation_config_round_trips_structured_output(
     exported_generation_config = next(
         item for item in exported.json()["generation_configs"] if item["id"] == payload["id"]
     )
-    assert exported_generation_config["config"] == {"structured_output": {"enabled": True, "mode": "json_schema"}}
+    assert exported_generation_config["config"] == {
+        "structured_output": {"enabled": True, "mode": "json_schema"},
+        "supports_image_understanding": False,
+    }
 
 
 def test_text_generation_config_test_api_runs_openai_chat_completions_provider(
@@ -2388,6 +2400,174 @@ def test_text_generation_config_test_api_runs_openai_chat_completions_provider(
     ]
     assert "文案用途：mood_board" in payload["request_context"]["copy"]["user_content"]
     assert "参考图：未连接" in payload["request_context"]["copy"]["user_content"]
+
+
+def test_text_generation_config_test_api_syncs_image_understanding_support_from_reference_images(
+    configured_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inspiration_one_backend.application.contracts import CopyPayloadV2, CreativeBriefPayload, FreeformCopyContent
+    from inspiration_one_backend.presentation.api import create_app
+
+    reference_counts: list[int] = []
+    outcomes = iter(["success", "fail", "success"])
+
+    def fake_generate_brief(self, inspiration):
+        return (
+            CreativeBriefPayload(
+                positioning="通勤杯定位",
+                audience="上班族",
+                selling_angles=["保温", "轻便", "好清洁"],
+                taboo_phrases=[],
+                poster_style_hint="白底",
+            ),
+            self.brief_model,
+        )
+
+    def fake_generate_copy(self, inspiration, brief, config=None, reference_images=None):
+        del inspiration, brief, config
+        reference_count = len(reference_images or [])
+        reference_counts.append(reference_count)
+        outcome = next(outcomes)
+        if reference_count and outcome == "fail":
+            raise ValueError("当前模型不支持图片理解")
+        return (
+            CopyPayloadV2(
+                summary="通勤杯 主图文案",
+                content=FreeformCopyContent(text="轻便保温，通勤随手带。"),
+            ),
+            self.copy_model,
+        )
+
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider."
+        "OpenAIChatCompletionsTextProvider.generate_brief",
+        fake_generate_brief,
+    )
+    monkeypatch.setattr(
+        "inspiration_one_backend.infrastructure.text.openai_chat_completions_provider."
+        "OpenAIChatCompletionsTextProvider.generate_copy",
+        fake_generate_copy,
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    _login(client)
+
+    profile = client.post(
+        "/api/settings/provider-profiles",
+        json={
+            "name": "Chat Completions 带图测试网关",
+            "provider_type": "openai_compatible",
+            "base_url": "https://chat-test.example/v1",
+            "api_key": "chat-test-secret-key",
+            "capabilities": ["text_chat_completions"],
+            "default_models": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+            "config": {},
+            "enabled": True,
+        },
+    )
+    assert profile.status_code == 200
+
+    generation_config = client.post(
+        "/api/settings/generation-configs",
+        json={
+            "name": "带图文案配置",
+            "purpose": "text",
+            "provider_kind": "openai_chat_completions",
+            "provider_profile_id": profile.json()["id"],
+            "model_settings": {"brief_model": "grok-brief", "copy_model": "grok-copy"},
+            "config": {"supports_image_understanding": False},
+            "priority": 100,
+            "max_concurrency": 1,
+            "enabled": True,
+        },
+    )
+    assert generation_config.status_code == 200
+    generation_config_id = generation_config.json()["id"]
+
+    upload = client.post(
+        "/api/resource-library/assets/upload",
+        files=[("images", ("reference.png", _make_demo_image_bytes(), "image/png"))],
+    )
+    assert upload.status_code == 201
+    reference_asset_id = upload.json()["items"][0]["id"]
+
+    session = get_session_factory()()
+    try:
+        saved_config = session.get(GenerationConfig, generation_config_id)
+        assert saved_config is not None
+        assert saved_config.config_json["supports_image_understanding"] is False
+    finally:
+        session.close()
+
+    with_reference = {
+        "generation_config_id": generation_config_id,
+        "reference_asset_ids": [reference_asset_id],
+        "inspiration": {"name": "便携咖啡杯", "category": "杯具", "source_note": "适合通勤"},
+        "copy_request": {
+            "instruction": "突出保温和便携",
+            "purpose": "mood_board",
+            "channel": "视觉脚本",
+            "tone": "安静、留白",
+            "output_mode": "freeform",
+        },
+    }
+
+    success = client.post("/api/settings/generation-configs/test-text", json=with_reference)
+    assert success.status_code == 200
+
+    session = get_session_factory()()
+    try:
+        saved_config = session.get(GenerationConfig, generation_config_id)
+        assert saved_config is not None
+        assert saved_config.config_json["supports_image_understanding"] is True
+    finally:
+        session.close()
+
+    failure = client.post("/api/settings/generation-configs/test-text", json=with_reference)
+    assert failure.status_code == 400
+    assert failure.json()["detail"] == "当前模型不支持图片理解"
+
+    session = get_session_factory()()
+    try:
+        saved_config = session.get(GenerationConfig, generation_config_id)
+        assert saved_config is not None
+        assert saved_config.config_json["supports_image_understanding"] is False
+    finally:
+        session.close()
+
+    manual_update = client.patch(
+        f"/api/settings/generation-configs/{generation_config_id}",
+        json={"config": {"supports_image_understanding": True}},
+    )
+    assert manual_update.status_code == 200
+
+    no_reference = client.post(
+        "/api/settings/generation-configs/test-text",
+        json={
+            "generation_config_id": generation_config_id,
+            "inspiration": {"name": "便携咖啡杯", "category": "杯具", "source_note": "适合通勤"},
+            "copy_request": {
+                "instruction": "突出保温和便携",
+                "purpose": "mood_board",
+                "channel": "视觉脚本",
+                "tone": "安静、留白",
+                "output_mode": "freeform",
+            },
+        },
+    )
+    assert no_reference.status_code == 200
+
+    session = get_session_factory()()
+    try:
+        saved_config = session.get(GenerationConfig, generation_config_id)
+        assert saved_config is not None
+        assert saved_config.config_json["supports_image_understanding"] is True
+    finally:
+        session.close()
+
+    assert reference_counts == [1, 1, 0]
 
 
 def test_text_generation_config_json_response_format_test_api_sends_response_format(

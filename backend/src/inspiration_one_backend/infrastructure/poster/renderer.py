@@ -1,30 +1,30 @@
 from __future__ import annotations
 
 from io import BytesIO
-from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from inspiration_one_backend.application.contracts import PosterGenerationInput
+from inspiration_one_backend.application.contracts import PosterGenerationInput, ReferenceImageInput
 from inspiration_one_backend.config import get_runtime_settings
 from inspiration_one_backend.domain.enums import PosterKind
 
 
-def _load_font(font_path: Path, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def _load_font(font_path, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     try:
         return ImageFont.truetype(str(font_path), size=size)
     except OSError:
         return ImageFont.load_default()
 
 
-def _fit_source_image(source_path: Path, size: tuple[int, int]) -> Image.Image:
-    image = Image.open(source_path).convert("RGBA")
-    image.thumbnail(size, Image.Resampling.LANCZOS)
-    canvas = Image.new("RGBA", size, (255, 255, 255, 0))
-    left = (size[0] - image.width) // 2
-    top = (size[1] - image.height) // 2
-    canvas.alpha_composite(image, (left, top))
-    return canvas
+def _fit_source_image(source_image: ReferenceImageInput, size: tuple[int, int]) -> Image.Image:
+    with Image.open(BytesIO(source_image.bytes_data)) as image:
+        fitted = image.convert("RGBA")
+        fitted.thumbnail(size, Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", size, (255, 255, 255, 0))
+        left = (size[0] - fitted.width) // 2
+        top = (size[1] - fitted.height) // 2
+        canvas.alpha_composite(fitted, (left, top))
+        return canvas
 
 
 def _draw_wrapped_text(
@@ -80,7 +80,7 @@ def _points_from_payload(payload: PosterGenerationInput) -> list[str]:
 
 
 class PosterRenderer:
-    def __init__(self, font_path: Path | None = None) -> None:
+    def __init__(self, font_path=None) -> None:
         self.font_path = font_path or get_runtime_settings().poster_font_path
 
     def render(self, payload: PosterGenerationInput, kind: PosterKind) -> bytes:

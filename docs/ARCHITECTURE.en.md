@@ -6,24 +6,24 @@ Current architecture health, completed cleanup, and remaining risks are tracked 
 
 ## 1. System Overview
 
-Inspiration One consists of the frontend, backend API, background worker, PostgreSQL, Redis, and local file storage:
+Inspiration One consists of the frontend, backend API, background worker, PostgreSQL, Redis, and one active storage backend:
 
 ```text
 React/Vite web
   -> FastAPI backend
     -> PostgreSQL metadata
     -> Redis/Dramatiq queue
-    -> local storage files
+    -> local filesystem or MinIO/S3 object storage
     -> text provider / image provider
   -> Dramatiq worker
     -> same database, queue, storage and providers
 ```
 
-The default self-hosted path is driven by the root `docker-compose.yml`. `docker compose up -d --build` builds and starts the FastAPI backend, the Dramatiq worker, and the nginx-served Web static site. API/worker containers read `DATABASE_URL` / `REDIS_URL` from `.env` and connect to the shared PostgreSQL container `libowpg` and Redis container `libowredis` maintained under `/Users/yunlong/project/self/env`; storage is selected by `STORAGE_BACKEND`. With `STORAGE_BACKEND=local`, API/worker containers share persistent storage mounted at `/app/storage`, backed by the Docker named volume `inspiration-one-storage` when `STORAGE_HOST_PATH` is not set. When migrating from an older systemd production environment, you can set the host-only variable `STORAGE_HOST_PATH=/home/cot/Inspiration One-release/shared/storage` to bind-mount an existing host storage directory to `/app/storage`; the runtime container still keeps `STORAGE_ROOT=/app/storage`. With `STORAGE_BACKEND=minio` or `STORAGE_BACKEND=s3`, API/worker containers use S3-compatible object storage and `STORAGE_ROOT` is only the local cache and image-variant workspace. The backend container runs Alembic migrations before starting `uvicorn`.
+The default self-hosted path is driven by the root `docker-compose.yml`. `docker compose up -d --build` builds and starts the FastAPI backend, Dramatiq worker, and nginx-served Web static site. API/worker containers read `DATABASE_URL` / `REDIS_URL` from `.env` and connect to the shared `libowpg` and `libowredis` middleware maintained under `/Users/yunlong/project/self/env`. Local storage mode mounts persistent `/app/storage`, backed by `inspiration-one-storage` when `STORAGE_HOST_PATH` is not set. MinIO/S3 mode adds `docker-compose.object-storage.yml`, removes API/worker business-storage mounts, and sets non-persistent `STORAGE_TEMP_ROOT=/tmp/inspiration-one-storage`. Logs use the independent `inspiration-one-logs` volume with separate API and worker directories. The backend container runs Alembic migrations before starting `uvicorn`.
 
-The production update entrypoint is `just release`, which calls `scripts/release.sh` to validate Compose configuration, stop legacy user-level systemd services (`inspiration-one-backend.service`, `inspiration-one-worker.service`, `inspiration-one-web.service`, used to free old release ports 29280/29281), run `docker compose up -d --build --remove-orphans`, and perform HTTP health checks. `just release-dry-run` only validates configuration and prints the plan; it does not stop old services, build, or start containers. Normal updates do not delete Docker volumes.
+The production update entrypoint is `just release`. `scripts/release.sh` reads `STORAGE_BACKEND` from `.env`, selects either the base Compose file or the base plus object-storage override, and verifies that object mode has no `/app/storage` mount. It then stops legacy user-level systemd services, rebuilds the stack, and performs HTTP health checks. `just release-dry-run` validates the same file set and prints the exact commands without stopping services, building, or starting containers. Normal updates do not delete Docker volumes.
 
-Local hot-reload development is still driven by the root `justfile`: after the shared middleware containers `libowpg`, `libowredis`, and `libowminio` are running, run the API, worker, and frontend separately with `just backend-run`, `just backend-worker`, and `just web-dev`. The development environment uses `STORAGE_BACKEND=minio` plus `STORAGE_ROOT=./backend/storage-dev` from `.env.dev`; `STORAGE_ROOT` is only the local cache directory. The wrapper script loads `S3_*` values from `/Users/yunlong/project/self/env/minio.env`. Do not start local development processes by shell-sourcing production `.env`.
+Local hot-reload development is still driven by the root `justfile`: after `libowpg`, `libowredis`, and `libowminio` are running, run the API, worker, and frontend with `just backend-run`, `just backend-worker`, and `just web-dev`. Development object mode uses `STORAGE_BACKEND=minio`, while the wrapper loads `S3_*` values from `/Users/yunlong/project/self/env/minio.env`. MinIO is the sole persistent file source; temporary materialization uses the operating-system temp directory by default. Do not start local development processes by shell-sourcing production `.env`.
 
 ## 2. Backend Layering
 
@@ -200,9 +200,15 @@ Prompt template overrides cover inspiration understanding, copy generation, work
 
 ## 9. File Storage and Downloads
 
-Files are managed by `StorageService` in `infrastructure/storage.py`; `LocalStorage` remains as a compatibility alias. With `STORAGE_BACKEND=local`, objects are written under `STORAGE_ROOT`. With `STORAGE_BACKEND=minio` or `STORAGE_BACKEND=s3`, objects are written through the S3-compatible backend and cached under `STORAGE_ROOT` for downloads and image variants. `STORAGE_HOST_PATH` only controls the host bind-mount source and should not be passed into application logic as a replacement for `STORAGE_ROOT`.
+Files are managed by `StorageService` in `infrastructure/storage.py`; `LocalStorage` remains as a compatibility alias. Each process uses one backend selected by `STORAGE_BACKEND`. Local mode persists objects under `STORAGE_ROOT`. MinIO/S3 mode treats object storage as the sole persistent file source: it does not create, read, or write a reusable server-side business cache and never falls back to a same-named local file. `STORAGE_ROOT` and `STORAGE_HOST_PATH` belong only to local mode.
 
-Image resource tables do not store full access URLs. They store object identity fields: `storage_backend`, `storage_bucket`, and `storage_object_key`. The legacy `storage_path` field remains for compatibility; reads prefer `storage_object_key` and fall back to `storage_path` when the new key is absent. Inspiration lists, galleries, and image sessions receive MinIO/S3 URLs generated by the API from the current storage configuration; local storage or missing public access config falls back to backend download routes.
+Normal business reads use bounded byte access or closeable streams. `materialize()` creates a scoped file under `STORAGE_TEMP_ROOT` or the operating-system temp directory only for path-only libraries and cleans it on exit. Pure ownership copies use backend `copy_object()` without API/worker memory transfer. Business cleanup updates database state and relationships without physically deleting objects; lifecycle policies or a separate controlled process own unreferenced-object cleanup.
+
+Image resource tables store object identity fields (`storage_backend`, `storage_bucket`, and `storage_object_key`) rather than full access URLs. Legacy `storage_path` remains a key fallback. API DTOs always return stable application URLs. Images, Enhance tiles, Deck slide images, and image-to-code previews are same-origin backend proxies. Explicit non-image attachments may use short-lived signed URLs from `S3_PUBLIC_ENDPOINT_URL` after authorization; when no public endpoint is configured, delivery falls back to same-origin streaming. Controlled responses support single-range requests, consistent security headers, and deterministic remote-stream closure.
+
+Preview and thumbnail variants are derived objects in the active backend and are generated by idempotent background tasks. A missing variant schedules work and returns the original image with `Cache-Control: no-store` and `X-Image-Variant: pending`. Reads support canonical WebP and legacy JPG keys.
+
+The legacy `backend/backend/storage-dev` directory is outside this architecture. It has no audit, migration, repair, or missing-object recovery path.
 
 User-downloadable files are read through controlled routes, for example:
 

@@ -50,8 +50,10 @@ Use the root `justfile` where possible so local env loading and ports match the 
 - Local host development uses `.env.dev` with `localhost:15432/inspiration_flow` and `localhost:16379/0`.
 - Do not reintroduce PostgreSQL or Redis services into `docker-compose.yml`; they are shared middleware for multiple
   projects.
-- Container storage must use a shared in-container path `STORAGE_ROOT=/app/storage`.
-- `STORAGE_HOST_PATH` is host-only Compose interpolation for production bind mounts. When unset, `/app/storage` is backed
+- Local-backend containers share `STORAGE_ROOT=/app/storage`. MinIO/S3 containers add
+  `docker-compose.object-storage.yml`, have no `/app/storage` mount, and use object storage as the sole persistent file
+  source.
+- `STORAGE_HOST_PATH` is local-backend-only host interpolation for production bind mounts. When unset, `/app/storage` is backed
   by the named volume `inspiration-one-storage`; when set, it may point at an existing host directory such as
   `/home/cot/ProductFlow-release/shared/storage` for old systemd production storage reuse.
 - Local hot-reload development must stay isolated on `.env.dev` / `STORAGE_ROOT=./backend/storage-dev`; do not depend on
@@ -68,9 +70,9 @@ Use the root `justfile` where possible so local env loading and ports match the 
 - Migration failure -> backend container must fail before serving API traffic.
 - Backend unhealthy -> worker and web must wait for backend health before starting.
 - Web `/api/*` not proxied -> same-origin frontend API calls fail even if static files load.
-- Old systemd production files disappear after migration -> check whether `STORAGE_HOST_PATH` was set to the existing host
+- Local-backend systemd production files disappear after migration -> check whether `STORAGE_HOST_PATH` was set to the existing host
   storage directory before Compose created/used a fresh named volume.
-- `STORAGE_HOST_PATH` leaks into container application config or replaces `STORAGE_ROOT` -> fix Compose env wiring; the app
+- `STORAGE_HOST_PATH` leaks into container application config or replaces local `STORAGE_ROOT` -> fix Compose env wiring; the app
   should still see `STORAGE_ROOT=/app/storage`.
 
 #### 5. Good/Base/Bad Cases
@@ -79,6 +81,8 @@ Use the root `justfile` where possible so local env loading and ports match the 
   is OK, and web `/api/healthz` returns backend health.
 - Good: `STORAGE_HOST_PATH=/home/cot/ProductFlow-release/shared/storage docker compose up -d --build` bind-mounts old
   production files while API/worker still run with `STORAGE_ROOT=/app/storage`.
+- Good: minio/s3 uses base + object-storage override, API/worker have no `/app/storage` mount, temporary materialization is
+  under `/tmp/inspiration-one-storage`, and logs remain on the independent log volume.
 - Base: local development reuses `libowpg` and `libowredis`, while host `just` commands run API/worker/web.
 - Bad: `DATABASE_URL` points at `localhost` from inside containers; that targets the app container itself, not Postgres.
 - Bad: `docker-compose.yml` starts project-local PostgreSQL or Redis containers for ProductFlow after the middleware split.
@@ -89,8 +93,9 @@ Use the root `justfile` where possible so local env loading and ports match the 
 #### 6. Tests Required
 
 - Run `docker compose config --quiet` after Compose/env edits.
-- For storage-related Compose changes, render config with `STORAGE_HOST_PATH` both unset and set; assert backend/worker
-  mount `/app/storage`, keep `STORAGE_ROOT=/app/storage`, and do not expose `STORAGE_HOST_PATH` in container env.
+- For storage-related Compose changes, render local config with `STORAGE_HOST_PATH` both unset and set; assert backend/worker
+  mount `/app/storage`, keep `STORAGE_ROOT=/app/storage`, and do not expose `STORAGE_HOST_PATH` in container env. Render
+  base + object-storage override and assert no `/app/storage` mount, separate log dirs, and non-persistent temp roots.
 - Build container images with `docker compose build inspiration-one-backend inspiration-one-web` or a full `docker compose up -d --build` smoke.
 - Smoke a disposable or safe project with direct API health, web health, and web `/api/healthz` proxy checks when practical.
 - Keep normal backend/frontend gates green when Dockerfiles or docs depend on package commands: backend tests/ruff and frontend lint/test/build.
@@ -152,8 +157,8 @@ volumes:
 - Local env backups such as `.env.bak-*` must stay ignored; they may contain copied production secrets and must not be
   inspected, tracked, or included in open-source release hygiene diffs.
 - Release/update helpers must not delete Docker volumes; `docker compose down -v` is only a documented manual reset.
-- Dry-run must remain non-switching and non-service-starting while still validating `docker compose config --quiet` and
-  showing the real command sequence.
+- Dry-run must remain non-switching and non-service-starting while validating the Compose file set selected by
+  `STORAGE_BACKEND`, including object-mode mount assertions, and showing the real command sequence.
 - Release helpers must not shell-source `.env`; use Docker Compose's env parsing for service configuration and read only
   the specific local values needed for health-check URLs without executing the file.
 - Compose release must gracefully tolerate missing or inactive legacy systemd services but should try to stop them before
@@ -228,11 +233,13 @@ the infrastructure provider factories. Tests and future composition code that ne
 #### Scenario: OpenAI-compatible Chat Completions image providers
 
 ##### 1. Scope / Trigger
+
 - Trigger: adding or changing a third-party image provider that generates images through `/v1/chat/completions`.
 - Applies to OpenAI-compatible gateway models such as Packy Banana/Gemini image models where the provider profile is
   `provider_type="openai_compatible"`.
 
 ##### 2. Signatures
+
 - Provider kind: `openai_chat_image`.
 - Required provider capability: `image_chat`.
 - Backend client: `OpenAIChatImageClient.generate_image(prompt, size, reference_images=None, model=None)`.
@@ -244,6 +251,7 @@ the infrastructure provider factories. Tests and future composition code that ne
   `openai_chat_image`.
 
 ##### 3. Contracts
+
 - Request endpoint is `<base_url>/v1/chat/completions`; if `base_url` already ends with `/v1`, append
   `/chat/completions`.
 - Request payload includes:
@@ -263,6 +271,7 @@ the infrastructure provider factories. Tests and future composition code that ne
 - Do not persist or log prompt bodies, data URLs, raw base64, image bytes, API keys, or full provider responses.
 
 ##### 4. Validation & Error Matrix
+
 - Missing API key -> `RuntimeError("图片供应商档案缺少 API Key")`.
 - Profile missing `image_chat` -> settings validation error `"供应商档案不支持当前接口能力"`.
 - Provider returns no supported image source -> `RuntimeError("图片供应商没有返回图片结果，请稍后重试")`.
@@ -275,6 +284,7 @@ the infrastructure provider factories. Tests and future composition code that ne
   raw base64 image text.
 
 ##### 5. Good/Base/Bad Cases
+
 - Good: Packy-style profile uses `base_url="https://www.packyapi.com"`, capability `image_chat`, and generation config
   kind `openai_chat_image`.
 - Good: chat-completions image generation calls can run for the same operator-tuned timeout as other AI image generation
@@ -287,6 +297,7 @@ the infrastructure provider factories. Tests and future composition code that ne
 - Bad: storing returned data URLs or raw base64 in `provider_request_json` or `provider_output_json`.
 
 ##### 6. Tests Required
+
 - Provider payload test asserts endpoint URL, `stream=false`, string content for text-only calls, text plus `image_url`
   content parts for reference-image calls, and sanitized persisted request metadata.
 - Provider response tests cover data URL, HTTP(S) URL download, raw base64, raw `image/*` non-JSON response bytes, and
@@ -299,6 +310,7 @@ the infrastructure provider factories. Tests and future composition code that ne
 - Frontend build must pass after updating provider kind/capability unions and settings labels.
 
 ##### 7. Wrong vs Correct
+
 Wrong:
 
 ```python
@@ -319,14 +331,17 @@ httpx.Client(...).post(chat_completions_url, json=payload)
 #### Scenario: Workflow execution dependency seams
 
 ##### 1. Scope / Trigger
+
 - Trigger: editing workflow execution provider or renderer construction.
 
 ##### 2. Signatures
+
 - `WorkflowExecutionDependencies(text_provider_resolver, image_provider_resolver, poster_renderer_factory)`.
 - `run_inspiration_workflow(..., dependencies=None)`, `execute_inspiration_workflow_run(..., dependencies=None)`, and internal
   `_execute_node(..., dependencies=None)` accept this seam without changing API/worker call sites.
 
 ##### 3. Contracts
+
 - `None` uses default resolvers that call the infrastructure text/image provider factories.
 - The `inspiration_workflows.py` facade exports public workflow use cases for route/worker imports only; it must not expose
   provider factory helpers or private `_...` execution helpers as test seams.
@@ -334,10 +349,12 @@ httpx.Client(...).post(chat_completions_url, json=payload)
   instances, not concrete SDK payloads.
 
 ##### 4. Validation & Error Matrix
+
 - Resolver/provider failure -> existing workflow failure handling persists the run/node failure reason.
 - Missing image provider for generated mode -> remains a runtime execution failure, not a schema/API change.
 
 ##### 5. Good/Base/Bad Cases
+
 - Good: a focused test injects fake providers through `WorkflowExecutionDependencies`.
 - Base: route/worker code calls public workflow use cases with `dependencies=None`, and execution resolves providers via
   the infrastructure factories.
@@ -346,10 +363,12 @@ httpx.Client(...).post(chat_completions_url, json=payload)
 - Bad: workflow execution imports a concrete provider SDK class.
 
 ##### 6. Tests Required
+
 - Keep provider/workflow regression tests passing after resolver changes.
 - Add a focused injection test when changing resolver behavior itself.
 
 ##### 7. Wrong vs Correct
+
 Wrong:
 
 ```python
@@ -1010,7 +1029,8 @@ and add/update an Alembic revision under `backend/alembic/versions/`. Existing t
 - Database-owned business constraints such as PostgreSQL native enums, enum-style `CHECK` allowlists, or foreign keys.
   Keep primary keys, nullability, ordinary indexes, unique indexes, and partial unique indexes.
 - Unbounded list endpoints that load all rows for UI lists.
-- Raw filesystem access for user-controlled storage paths; go through `LocalStorage.resolve(...)`.
+- Raw filesystem access for stored objects or user-controlled keys; use validated `StorageService` bytes/stream/copy/
+  materialize contracts and keep scoped paths inside their context manager.
 - Broad `except Exception` that hides failures. Existing broad catches are narrow boundary cases:
   durable queue enqueue failure inside application submit helpers, config table bootstrap tolerance in `config.py`, and
   provider error classification in application/provider code.

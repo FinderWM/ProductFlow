@@ -48,7 +48,6 @@
   - `run_image_to_code_job(job_id: str) -> None`
 - Storage API:
   - `save_image_to_code_file(job_id, relative_path, content, *, content_type=None, warm_variants=False) -> str`
-  - `delete_image_to_code_artifacts(job_id) -> None`
 
 ### 3. Contracts
 
@@ -71,7 +70,8 @@
 - Artifact/storage contract:
   - Storage layout is isolated under `image-to-code/{job_id}/source/`, `preview/`, `site/`, `figma/`, and `reports/`.
   - `site_index_html` reuses the persisted `site/index.html` storage object instead of writing a duplicate artifact file.
-  - Failed or cancelled jobs clear `result_manifest_json` and delete the entire `image-to-code/{job_id}` tree.
+  - Failed or cancelled jobs clear `result_manifest_json`. Objects already written under `image-to-code/{job_id}` remain
+    unreferenced for storage lifecycle cleanup; business flows do not physically delete them.
 - Figma reservation contract:
   - First release supports only local export artifacts such as `figma-layer-spec.json`, `figma-import.zip`, and
     `README.md`.
@@ -121,7 +121,7 @@
   - success lifecycle with preview/site/Figma artifacts
   - cancel + retry contract
   - stale running recovery and requeue behavior
-  - storage cleanup after cancellation/failure
+  - cancellation/failure clears durable manifest references without calling object delete APIs
 - Migration tests:
   - model/migration contract for `image_to_code_jobs`
   - enum columns remain string-backed with no DB enum/check constraint

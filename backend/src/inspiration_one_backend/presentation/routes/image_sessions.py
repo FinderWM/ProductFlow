@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -24,9 +24,8 @@ from inspiration_one_backend.application.image_sessions import (
 from inspiration_one_backend.application.moderation import ensure_resource_usable
 from inspiration_one_backend.domain.rbac import API_IMAGE_CHAT_GENERATE, API_IMAGE_CHAT_READ, API_IMAGE_CHAT_WRITE
 from inspiration_one_backend.infrastructure.db.models import AuthUser, GenerationResourceGroup, ImageSessionAsset
-from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage
+from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage, StorageError
 from inspiration_one_backend.presentation.deps import get_session, require_api_permission, require_deletion_enabled
-from inspiration_one_backend.presentation.image_variants import build_variant_filename
 from inspiration_one_backend.presentation.schemas.generation_resource_groups import (
     serialize_generation_resource_group_tag,
 )
@@ -45,6 +44,7 @@ from inspiration_one_backend.presentation.schemas.image_sessions import (
     serialize_image_session_status,
     serialize_image_session_summary,
 )
+from inspiration_one_backend.presentation.storage_responses import image_storage_object, raise_storage_response_error
 from inspiration_one_backend.presentation.upload_validation import (
     read_validated_image_upload,
     validate_reference_image_count,
@@ -352,6 +352,7 @@ def attach_image_session_asset_to_inspiration_endpoint(
 @router.get("/image-session-assets/{asset_id}/download")
 def download_image_session_asset_endpoint(
     asset_id: str,
+    request: Request,
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_IMAGE_CHAT_READ)),
@@ -364,14 +365,15 @@ def download_image_session_asset_endpoint(
         raise HTTPException(status_code=404, detail="会话图片不存在")
     ensure_resource_usable(asset)
     storage = LocalStorage()
-    object_key = storage.object_key_for(asset)
     try:
-        path, media_type = storage.resolve_for_variant(
+        object_key = storage.object_key_for(asset)
+        return image_storage_object(
+            storage,
             object_key,
-            variant,
+            variant=variant,
+            range_header=request.headers.get("range"),
+            filename=asset.original_filename,
             fallback_media_type=asset.mime_type,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="会话图片文件不存在") from exc
-    filename = build_variant_filename(asset.original_filename, variant=variant, resolved_suffix=path.suffix)
-    return FileResponse(path, media_type=media_type, filename=filename)
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="会话图片文件不存在")

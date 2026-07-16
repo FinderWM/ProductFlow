@@ -70,7 +70,7 @@ def test_direct_enhance_job_lifecycle_succeeds(db_session) -> None:
     assert saved.result_manifest_json is not None
     assert saved.result_manifest_json["final_image_ref"] == f"enhance/{job.id}/final.png"
     assert saved.result_manifest_json["final_status"] == "ready"
-    assert LocalStorage().resolve(saved.result_manifest_json["final_image_ref"]).exists()
+    assert LocalStorage().stat(saved.result_manifest_json["final_image_ref"]).content_length > 0
     group = ensure_default_resource_library_group(db_session, owner_user_id=ADMIN_USER_ID)
     result = save_enhance_job_to_library(
         db_session,
@@ -303,8 +303,8 @@ def test_cleanup_expired_enhance_inputs_keeps_referenced_snapshots(db_session) -
     assert deleted == 1
     assert db_session.get(type(old_unreferenced), old_unreferenced.id) is None
     assert db_session.get(type(old_referenced), old_referenced.id) is not None
-    assert not LocalStorage().resolve(old_unreferenced_path).exists()
-    assert LocalStorage().resolve(old_referenced_path).exists()
+    assert LocalStorage().stat(old_unreferenced_path).content_length > 0
+    assert LocalStorage().stat(old_referenced_path).content_length > 0
 
 
 def test_enhance_job_requeues_when_image_capacity_is_full(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -343,7 +343,10 @@ def test_enhance_job_requeues_when_image_capacity_is_full(db_session, monkeypatc
     assert sent == [(job.id, 2000)]
 
 
-def test_enhance_job_cancel_cleans_partial_artifacts(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enhance_job_cancel_keeps_partial_artifacts_for_lifecycle_cleanup(
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ensure_provider_config_bootstrapped(db_session)
     source_id = _create_source_asset(db_session, width=160, height=120)
     job = create_enhance_job(
@@ -359,7 +362,13 @@ def test_enhance_job_cancel_cleans_partial_artifacts(db_session, monkeypatch: py
     artifact_key = f"enhance/{job.id}/tile-0-0.png"
 
     def cancel_after_artifact(job_arg, ctx):
-        ctx.storage.save_enhance_tile(f"enhance/{job_arg.id}", 0, 0, _image_bytes(32, 32), suffix=".png")
+        ctx.storage.save_enhance_tile(
+            f"enhance/{job_arg.id}",
+            0,
+            0,
+            _image_bytes(32, 32),
+            content_type="image/png",
+        )
         raise EnhanceCancelledError("cancelled")
 
     monkeypatch.setattr("inspiration_one_backend.application.enhance.jobs._run_strategy", cancel_after_artifact)
@@ -370,7 +379,7 @@ def test_enhance_job_cancel_cleans_partial_artifacts(db_session, monkeypatch: py
     saved = db_session.get(EnhanceJob, job.id)
     assert saved is not None
     assert saved.status == JobStatus.CANCELLED
-    assert not LocalStorage().resolve(artifact_key).exists()
+    assert LocalStorage().stat(artifact_key).content_length > 0
 
 
 def test_enhance_job_cancel_check_observes_cross_session_status(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -389,7 +398,13 @@ def test_enhance_job_cancel_check_observes_cross_session_status(db_session, monk
     artifact_key = f"enhance/{job.id}/tile-0-0.png"
 
     def cancel_from_other_session(job_arg, ctx):
-        ctx.storage.save_enhance_tile(f"enhance/{job_arg.id}", 0, 0, _image_bytes(32, 32), suffix=".png")
+        ctx.storage.save_enhance_tile(
+            f"enhance/{job_arg.id}",
+            0,
+            0,
+            _image_bytes(32, 32),
+            content_type="image/png",
+        )
         with get_session_factory()() as other_session:
             other_job = other_session.get(EnhanceJob, job_arg.id)
             assert other_job is not None
@@ -407,10 +422,10 @@ def test_enhance_job_cancel_check_observes_cross_session_status(db_session, monk
     saved = db_session.get(EnhanceJob, job.id)
     assert saved is not None
     assert saved.status == JobStatus.CANCELLED
-    assert not LocalStorage().resolve(artifact_key).exists()
+    assert LocalStorage().stat(artifact_key).content_length > 0
 
 
-def test_enhance_job_cancel_after_strategy_return_cleans_artifacts(
+def test_enhance_job_cancel_after_strategy_return_keeps_unreferenced_artifacts(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -429,7 +444,11 @@ def test_enhance_job_cancel_after_strategy_return_cleans_artifacts(
     final_key = f"enhance/{job.id}/final.png"
 
     def cancel_after_result(job_arg, ctx):
-        storage_key = ctx.storage.save_enhance_final(f"enhance/{job_arg.id}", _image_bytes(512, 512), suffix=".png")
+        storage_key = ctx.storage.save_enhance_final(
+            f"enhance/{job_arg.id}",
+            _image_bytes(512, 512),
+            content_type="image/png",
+        )
         with get_session_factory()() as other_session:
             other_job = other_session.get(EnhanceJob, job_arg.id)
             assert other_job is not None
@@ -472,7 +491,7 @@ def test_enhance_job_cancel_after_strategy_return_cleans_artifacts(
     saved = db_session.get(EnhanceJob, job.id)
     assert saved is not None
     assert saved.status == JobStatus.CANCELLED
-    assert not LocalStorage().resolve(final_key).exists()
+    assert LocalStorage().stat(final_key).content_length > 0
 
 
 def test_recover_unfinished_enhance_jobs_requeues_queued_jobs(
@@ -575,9 +594,9 @@ def _create_image_session_asset(
     storage = LocalStorage()
     content = _image_bytes(width, height)
     storage_key = (
-        storage.save_image_session_reference(image_session.id, "reference.png", content)
+        storage.save_image_session_reference(image_session.id, content, content_type="image/png")
         if kind == ImageSessionAssetKind.REFERENCE_UPLOAD
-        else storage.save_image_session_generated(image_session.id, content, suffix=".png")
+        else storage.save_image_session_generated(image_session.id, content, content_type="image/png")
     )
     asset = ImageSessionAsset(
         owner_user_id=ADMIN_USER_ID,
@@ -618,7 +637,11 @@ def _add_ready_image_session_enhance_job(
     db_session.flush()
     final_ref = None
     if final_ready:
-        final_ref = LocalStorage().save_enhance_final(f"enhance/{job.id}", _image_bytes(320, 240), suffix=".png")
+        final_ref = LocalStorage().save_enhance_final(
+            f"enhance/{job.id}",
+            _image_bytes(320, 240),
+            content_type="image/png",
+        )
     job.result_manifest_json = {
         "strategy": "direct",
         "final_width": 320,

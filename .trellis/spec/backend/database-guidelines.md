@@ -312,12 +312,13 @@ ConfigDefinition(
   - `POST /api/settings/generation-configs/{generation_config_id}/unfreeze`
   - `DELETE /api/settings/generation-configs/{generation_config_id}`
   - `POST /api/settings/generation-configs/reorder`
+  - `POST /api/settings/generation-configs/test-text`
   - `POST /api/settings/generation-configs/test-json-response-format`
   - `GET /api/settings/generation-config-status`
 - Resolver functions:
   - `resolve_text_provider_config(generation_config_id: str | None = None) -> ResolvedTextProviderConfig`
   - `resolve_image_provider_config(generation_config_id: str | None = None) -> ResolvedImageProviderConfig`
-  - `claim_generation_config(session, purpose, resource_group_id=None, generation_config_id=None) -> GenerationConfigClaim | None`
+  - `claim_generation_config(session, purpose, resource_group_id=None, generation_config_id=None, require_image_understanding=False) -> GenerationConfigClaim | None`
   - `release_generation_config_claim(session, generation_config_id, success=..., ...) -> None`
   - `unfreeze_generation_config(session, generation_config_id, commit=True) -> GenerationConfig`
 
@@ -360,6 +361,19 @@ ConfigDefinition(
   Responses text calls send `text.format`, Chat Completions text calls send `response_format`, and Chat Completions keeps
   `stream=false`. `json_schema` is the preferred mode; `json_object` remains available for compatible gateways that reject
   schema mode. Image-prompt polishing may use structured output internally, but must still return plain text to callers.
+- Text image-understanding support is a generation-config contract, not a provider-profile contract.
+  `generation_configs.config_json.supports_image_understanding` is the source of truth for text configs, defaults to
+  `false`, and remains manually editable through settings save/update/import/export.
+- `POST /api/settings/generation-configs/test-text` may carry `reference_asset_ids: list[str]`. The route must load those
+  resource-library images, pass them into the real brief/copy request context, and reuse the same prompt-context helpers
+  as normal provider execution instead of building a fake preview-only image description.
+- Image-aware text tests auto-sync only the tested generation config's
+  `config_json.supports_image_understanding` flag: success with at least one `reference_asset_id` sets it to `true`,
+  failure with at least one `reference_asset_id` sets it to `false`, and text tests without any reference image leave the
+  stored flag unchanged.
+- Runtime/workflow/image-session text scheduling must require `supports_image_understanding=true` whenever the text request
+  context contains real images, including inspiration source images and explicit reference images. Contexts without images
+  must not be filtered by this flag.
 - Image config is provider-kind scoped: `openai_responses` owns `responses_background_enabled`, while
   `openai_images` owns `images_quality` and `images_style`, and `google_gemini_image` owns `gemini_api_version` plus
   optional `gemini_output_mime_type`. Do not require or persist Responses background config for `openai_images`, Google
@@ -443,6 +457,12 @@ ConfigDefinition(
   `structured_output.enabled=false` -> `400`, enable-config detail.
 - `POST /api/settings/generation-configs/test-json-response-format` provider output that cannot be parsed as a JSON
   object -> `400` validation detail or `502` provider-test failure, matching the settings test boundary.
+- `POST /api/settings/generation-configs/test-text` with `reference_asset_ids` containing a missing, non-image, or
+  non-owner resource-library asset -> route-owned `400` validation detail.
+- Automatic or manual text claim with `require_image_understanding=True` and no eligible config in the selected group ->
+  `ValueError("当前供应商生成分组没有支持图片理解的文案生成配置")`.
+- Manual text claim with `require_image_understanding=True` and an explicit config whose
+  `supports_image_understanding` is false -> `ValueError("手动指定的生成配置不支持图片理解")`.
 - `POST/PATCH /api/settings/generation-configs` with `resource_group_ids` present -> replace all group bindings and update
   compatibility `resource_group_id` to the first binding or `null`.
 - `POST/PATCH /api/settings/generation-configs` with only legacy `resource_group_id` -> store zero or one group binding.
@@ -455,6 +475,8 @@ ConfigDefinition(
 - Good: an `openai` or `openai_chat_completions` text generation config stores
   `structured_output={"enabled": true, "mode": "json_schema"}`; Responses sends `text.format`, Chat Completions sends
   `response_format`, and image-prompt polishing still returns a plain string after internal parsing.
+- Good: a text generation config keeps `supports_image_understanding=true`; copy-generation runs with source/reference
+  images can claim it, and a successful image-aware text test keeps the flag on.
 - Good: a text gateway and an image gateway use different keys or URLs; bootstrap creates two profiles and one default
   config per purpose.
 - Good: a Google Gemini profile has `provider_type="google_gemini"`, no `base_url`, capability
@@ -467,8 +489,14 @@ ConfigDefinition(
   claim can use it if enabled, group-authorized, profile-available, and below concurrency.
 - Base: default local development has mock text/image configs and no real provider profile.
 - Base: status pages read `generation_config_states` plus today's stats row; they do not scan historical usage events.
+- Base: a text test without any `reference_asset_ids` still executes normally and does not change
+  `supports_image_understanding`, even if the operator toggled that flag manually beforehand.
 - Bad: showing `text_api_key` or `image_api_key` in `/api/settings`.
 - Bad: constructing an OpenAI client from `get_runtime_settings().image_api_key`.
+- Bad: storing image-understanding support on `provider_profiles.config_json` or inferring it only from supplier
+  capabilities while ignoring the selected text generation config.
+- Bad: building a settings text-test preview that says reference images are disconnected while the real provider request
+  actually included resource-library images.
 - Bad: modeling Google Gemini as an OpenAI-compatible gateway or storing a Gemini custom endpoint in `base_url`.
 - Bad: letting a failed task remain running because release/update stats raised on naive-vs-aware datetime comparison.
 - Bad: filtering runtime candidates only by the compatibility `generation_configs.resource_group_id` field after
@@ -505,15 +533,21 @@ ConfigDefinition(
   `gemini_output_mime_type` only when non-empty, and round-trips through config export/import.
 - Settings API test that `openai` and `openai_chat_completions` generation configs persist `structured_output`, resolver
   exposes it, legacy `structured_json_response_format_enabled` is normalized, and export/import round-trips it.
+- Settings API test that text generation configs persist/export/import `supports_image_understanding`, allow manual
+  toggling, and image-aware text tests set it true on success, false on failure, and leave it unchanged without
+  reference images.
 - Settings API test that `/api/settings/generation-configs/test-json-response-format` sends Chat Completions
   `response_format` and Responses `text.format`, then returns parsed JSON without mutating generation configs.
 - Provider payload test that `openai` sends Responses `text.format` and `openai_chat_completions` sends Chat Completions
   `response_format` only when per-config structured output is enabled; image-prompt polishing must still return text.
+- Provider payload tests should assert text providers send multimodal image parts (`input_image` / `image_url`) when
+  source or reference images are present.
 - Provider payload test that `google_gemini_image` dispatches to the official `google-genai` client with text plus
   reference image parts, aspect-ratio mapping, sanitized request metadata, and generic provider errors.
 - Provider payload tests should set legacy provider kind explicitly when they rely on env bootstrap.
 - Migration/API tests cover `generation_config_resource_groups` creation, legacy `resource_group_id` backfill, create/update
   with `resource_group_ids`, and import/export compatibility with both old and new fields.
+- Scheduler tests must cover `require_image_understanding=True` for both automatic and manual text claims.
 
 ### 7. Wrong vs Correct
 
@@ -1204,7 +1238,8 @@ storage lifecycle policies / a separate controlled cleanup process.
   `delete_inspiration_tree(...)` from `LocalStorage`.
 - Do not call `StorageBackend.delete(...)` or `delete_prefix(...)` from application business flows.
 - For create/update operations, file writes happen before adding the final DB asset rows.
-- Keep storage paths relative to the storage root; `LocalStorage.resolve()` guards against path traversal.
+- Keep stored object keys relative and validate them through `StorageService`; application code must not construct absolute
+  storage paths or recover a reusable `Path` from an object key.
 
 ## Scenario: Gallery-owned generated-image entries
 
@@ -1950,12 +1985,14 @@ system_prompt = settings.prompt_copy_system
 ## Scenario: Settings migration import and export
 
 ### 1. Scope / Trigger
+
 - Trigger: changes to settings migration routes, settings export payloads, settings import preview/commit, provider
   profile/binding migration, or SettingsPage import/export DTOs.
 - This is a cross-layer runtime-configuration contract spanning `Settings`, `CONFIG_DEFINITIONS`, `app_settings`,
   `provider_profiles`, `provider_bindings`, settings schemas/routes, and frontend settings UI.
 
 ### 2. Signatures
+
 - Export API: `GET /api/settings/export -> SettingsExportDocument`.
 - Import preview API: `POST /api/settings/import/preview -> SettingsImportPreviewResponse`.
 - Import commit API: `POST /api/settings/import -> SettingsImportCommitResponse`.
@@ -1964,6 +2001,7 @@ system_prompt = settings.prompt_copy_system
   `generation_configs`, `canvas_template_categories`, and `canvas_templates`.
 
 ### 3. Contracts
+
 - Export is for frontend-operation settings only. It includes effective runtime values from every `CONFIG_DEFINITIONS`
   key, plus active provider profiles, provider bindings, generation configs, and active canvas template/category
   governance rows.
@@ -1987,6 +2025,7 @@ system_prompt = settings.prompt_copy_system
   `scope`, owner references, category assignment, entry mode, and sort order.
 
 ### 4. Validation & Error Matrix
+
 - Malformed document -> `400` with `配置文件格式不正确`.
 - Unsupported schema version -> `400` with `配置文件版本不支持`.
 - Unsupported compatibility marker -> `400` with `配置文件兼容标识不支持`.
@@ -1999,6 +2038,7 @@ system_prompt = settings.prompt_copy_system
 - Non-mock binding without a valid compatible enabled provider profile -> `400` and no partial import.
 
 ### 5. Good/Base/Bad Cases
+
 - Good: export from a configured workspace, import into a clean workspace, and see the same settings page values,
   provider profiles, bindings, generation configs, template categories/templates, and provider API keys.
 - Good: preview an import file and show counts plus whether API keys are present before commit.
@@ -2010,6 +2050,7 @@ system_prompt = settings.prompt_copy_system
 - Bad: writing runtime rows before discovering a broken provider binding, leaving a half-imported state.
 
 ### 6. Tests Required
+
 - Settings export regression asserting runtime config includes every `CONFIG_DEFINITIONS` key and excludes env-only keys.
 - Export regression asserting provider API keys are present only in the export document, not in ordinary settings/profile
   reads.

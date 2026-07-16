@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from inspiration_one_backend.application.enhance.execution import ENHANCE_FINAL_MAX_UPLOAD_BYTES
@@ -20,9 +20,8 @@ from inspiration_one_backend.application.enhance.jobs import (
 from inspiration_one_backend.domain.enums import JobStatus
 from inspiration_one_backend.domain.rbac import API_ENHANCE_GENERATE, API_ENHANCE_READ
 from inspiration_one_backend.infrastructure.db.models import AuthUser
-from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage
+from inspiration_one_backend.infrastructure.storage import ImageVariantName, LocalStorage, StorageError
 from inspiration_one_backend.presentation.deps import get_session, require_api_permission
-from inspiration_one_backend.presentation.image_variants import build_variant_filename
 from inspiration_one_backend.presentation.schemas.enhance import (
     CreateEnhanceJobRequest,
     EnhanceJobListResponse,
@@ -38,6 +37,7 @@ from inspiration_one_backend.presentation.schemas.resource_library import (
     ResourceLibraryAssetResponse,
     serialize_resource_library_asset,
 )
+from inspiration_one_backend.presentation.storage_responses import image_storage_object, raise_storage_response_error
 
 router = APIRouter(prefix="/api/enhance-jobs", tags=["enhance"])
 ENHANCE_FINAL_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
@@ -123,9 +123,10 @@ def download_enhance_tile_endpoint(
     job_id: str,
     row: int,
     col: int,
+    request: Request,
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_ENHANCE_READ)),
-) -> FileResponse:
+) -> Response:
     job = get_enhance_job(
         session,
         job_id,
@@ -135,16 +136,17 @@ def download_enhance_tile_endpoint(
     storage_key = _tile_storage_key(job.result_manifest_json, row=row, col=col)
     if storage_key is None:
         raise HTTPException(status_code=404, detail="增强切片不存在")
-    return _file_response(storage_key, filename=f"enhance-{row}-{col}.png")
+    return _file_response(storage_key, filename=f"enhance-{row}-{col}.png", range_header=request.headers.get("range"))
 
 
 @router.get("/{job_id}/final")
 def download_enhance_final_endpoint(
     job_id: str,
+    request: Request,
     variant: ImageVariantName = Query(default="original"),
     session: Session = Depends(get_session),
     current_user: AuthUser = Depends(require_api_permission(API_ENHANCE_READ)),
-) -> FileResponse:
+) -> Response:
     job = get_enhance_job(
         session,
         job_id,
@@ -157,8 +159,9 @@ def download_enhance_final_endpoint(
         raise HTTPException(status_code=404, detail="增强结果不存在")
     return _file_response(
         final_ref,
-        filename=build_variant_filename(f"enhance-{job.id}.png", variant=variant, resolved_suffix=".png"),
+        filename=f"enhance-{job.id}.png",
         variant=variant,
+        range_header=request.headers.get("range"),
         fallback_media_type=str(manifest.get("final_mime_type") or job.source_mime_type or "image/png"),
     )
 
@@ -233,17 +236,21 @@ def _file_response(
     *,
     filename: str,
     variant: ImageVariantName = "original",
+    range_header: str | None = None,
     fallback_media_type: str = "image/png",
-) -> FileResponse:
+) -> Response:
+    storage = LocalStorage()
     try:
-        path, media_type = LocalStorage().resolve_for_variant(
+        return image_storage_object(
+            storage,
             storage_key,
-            variant,
+            variant=variant,
+            range_header=range_header,
+            filename=filename,
             fallback_media_type=fallback_media_type,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="增强文件不存在") from exc
-    return FileResponse(path, media_type=media_type, filename=filename)
+    except StorageError as exc:
+        raise_storage_response_error(exc, not_found_detail="增强文件不存在")
 
 
 def _ensure_final_upload_request_size(request: Request) -> None:

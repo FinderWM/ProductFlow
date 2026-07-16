@@ -43,6 +43,7 @@ from inspiration_one_backend.infrastructure.provider_config import (
     add_generation_config,
     add_generation_resource_group,
 )
+from inspiration_one_backend.infrastructure.provider_config_constants import TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY
 
 
 def _add_mock_generation_config(
@@ -51,6 +52,7 @@ def _add_mock_generation_config(
     purpose: str,
     name: str,
     resource_group_id: str = DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    supports_image_understanding: bool = False,
 ) -> GenerationConfig:
     return add_generation_config(
         session,
@@ -64,7 +66,11 @@ def _add_mock_generation_config(
             if purpose == TEXT_PURPOSE
             else {"model": "mock-image"}
         ),
-        config={},
+        config=(
+            {TEXT_SUPPORTS_IMAGE_UNDERSTANDING_KEY: supports_image_understanding}
+            if purpose == TEXT_PURPOSE
+            else {}
+        ),
         priority=1000,
         max_concurrency=4,
     )
@@ -164,7 +170,12 @@ def _fill_copy_node(node: WorkflowNode, copy_set: CopySet) -> None:
 
 
 def test_workflow_copy_generation_manual_text_config_is_used(db_session: Session) -> None:
-    text_config = _add_mock_generation_config(db_session, purpose=TEXT_PURPOSE, name="指定文案配置")
+    text_config = _add_mock_generation_config(
+        db_session,
+        purpose=TEXT_PURPOSE,
+        name="指定文案配置",
+        supports_image_understanding=True,
+    )
     inspiration, workflow = _create_image_workflow(db_session)
     copy_node = _node(workflow, WorkflowNodeType.COPY_GENERATION)
     workflow = update_workflow_node(
@@ -298,7 +309,11 @@ def test_workflow_image_enhance_node_outputs_reusable_source_asset(
     def fake_run_direct_strategy(ctx, params) -> EnhanceResult:
         captured["source_size"] = (ctx.source_width, ctx.source_height)
         captured["target_size"] = (params.target_width, params.target_height)
-        final_ref = ctx.storage.save_enhance_final(ctx.output_prefix, _make_demo_image_bytes(), ".png")
+        final_ref = ctx.storage.save_enhance_final(
+            ctx.output_prefix,
+            _make_demo_image_bytes(),
+            content_type="image/png",
+        )
         return EnhanceResult(
             tiles=[
                 EnhanceTile(
@@ -396,7 +411,11 @@ def test_workflow_image_enhance_node_persists_progress_snapshot(
     def fake_run_direct_strategy(ctx, params) -> EnhanceResult:
         assert ctx.progress_callback is not None
         ctx.progress_callback(1, 1)
-        final_ref = ctx.storage.save_enhance_final(ctx.output_prefix, _make_demo_image_bytes(), ".png")
+        final_ref = ctx.storage.save_enhance_final(
+            ctx.output_prefix,
+            _make_demo_image_bytes(),
+            content_type="image/png",
+        )
         return EnhanceResult(
             tiles=[
                 EnhanceTile(

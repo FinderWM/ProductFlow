@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from helpers import (
+    _enable_text_generation_configs_image_understanding,
     _execute_workflow_queue_inline,
     _login,
     _make_demo_image_bytes,
@@ -145,6 +146,7 @@ def test_inspiration_workflow_status_endpoint_returns_lightweight_state(db_sessi
         filename="box.png",
         content_type="image/png",
     )
+    _enable_text_generation_configs_image_understanding(db_session)
     inspiration_id = inspiration.id
 
     persisted_workflow = get_or_create_inspiration_workflow(db_session, inspiration_id)
@@ -658,12 +660,13 @@ def test_reference_workflow_node_bind_poster_reports_missing_file_as_bad_request
     assert response.json()["detail"] == "海报文件不存在"
 
 
-def test_image_generation_fill_replaces_reference_node_current_image(configured_env: Path) -> None:
+def test_image_generation_fill_replaces_reference_node_current_image(configured_env: Path, db_session) -> None:
     from inspiration_one_backend.presentation.api import create_app
 
     app = create_app()
     client = TestClient(app)
     _login(client)
+    _enable_text_generation_configs_image_understanding(db_session)
 
     created = client.post(
         "/api/inspirations",
@@ -728,6 +731,7 @@ def test_image_generation_serializes_multiple_targets_for_single_image_provider_
 
     session = get_session_factory()()
     try:
+        _enable_text_generation_configs_image_understanding(session, commit=False)
         session.add(AppSetting(key="poster_generation_mode", value="generated"))
         session.commit()
     finally:
@@ -849,6 +853,7 @@ def test_image_generation_batches_downstream_targets_with_batch_provider(
 
     session = get_session_factory()()
     try:
+        _enable_text_generation_configs_image_understanding(session, commit=False)
         session.add(AppSetting(key="poster_generation_mode", value="generated"))
         session.commit()
     finally:

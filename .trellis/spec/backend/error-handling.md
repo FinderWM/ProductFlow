@@ -84,8 +84,8 @@ Examples:
   workflow use cases were inventoried as typed at the route boundary.
 - `presentation/routes/inspirations.py`, `presentation/routes/image_sessions.py`, and `presentation/routes/gallery.py` let
   typed business errors propagate through the global handler after their route-facing failures were inventoried as typed.
-- Download/file-serving routes may still catch `ValueError` from `LocalStorage.resolve_for_variant(...)` and raise direct
-  `HTTPException(404)` because the route owns file-serving semantics.
+- Download/file-serving routes catch typed `StorageError` at the presentation boundary: object-not-found keeps the route's
+  resource-specific `HTTPException(404)`, while `StorageUnavailable` maps to a sanitized `503`.
 - Settings routes may still translate local configuration normalization `ValueError` into direct `HTTPException(400)`
   because settings runtime validation is presentation-owned.
 
@@ -201,10 +201,12 @@ permission dependency.
 ### Scenario: Authenticated-default personal API
 
 #### 1. Scope / Trigger
+
 - Trigger: adding a personal capability that every logged-in account receives by default, without RBAC assignment.
 - Current scope: `/api/resource-library/*`.
 
 #### 2. Signatures
+
 - Backend dependency: `Depends(require_authenticated)`.
 - Frontend private route: authenticated session only.
 - Route contract test matrix: `AUTHENTICATED_DEFAULT_ROUTE_PREFIXES = {"/api/resource-library"}`.
@@ -212,6 +214,7 @@ permission dependency.
   `MENU_DEFINITIONS`, `DEFAULT_ROLE_MENU_CODES`, or `API_PERMISSION_DEFINITIONS`.
 
 #### 3. Contracts
+
 - Unauthenticated request -> `401`, `{"detail": "请先登录"}`.
 - Authenticated request does not require `require_api_permission(...)`.
 - The feature still performs owner checks in application use cases; auth-only does not mean cross-user access.
@@ -221,6 +224,7 @@ permission dependency.
   databases do not keep showing removed menus such as `resource_library`.
 
 #### 4. Validation & Error Matrix
+
 - Missing session cookie -> `401`.
 - Logged-in user accessing own resource library -> allowed by route dependency.
 - Logged-in user accessing another user's source/resource -> application ownership check returns the expected business
@@ -231,6 +235,7 @@ permission dependency.
 - Authenticated-default route missing `require_authenticated` -> `test_route_rbac_contract.py` fails.
 
 #### 5. Good/Base/Bad Cases
+
 - Good: resource library routes depend on `require_authenticated`, and list/save/load/archive use cases check ownership.
 - Good: a member can call `/api/resource-library/groups` without any `resource_library:*` API permission and without a
   `resource_library` menu grant in the session payload.
@@ -239,6 +244,7 @@ permission dependency.
 - Bad: adding an auth-only private API without updating the route contract test matrix.
 
 #### 6. Tests Required
+
 - `uv run --directory backend pytest tests/test_route_rbac_contract.py tests/test_auth_rbac.py`.
 - Feature tests must cover owner isolation for every auth-only source/load path.
 - RBAC tests must assert resource library is usable by a logged-in member while absent from RBAC menu/API permission

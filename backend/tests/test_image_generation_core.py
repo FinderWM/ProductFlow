@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from helpers import _make_demo_image_bytes_with_size
 
@@ -42,15 +41,23 @@ def test_image_generation_core_normalizes_ids_tool_options_and_reference_payload
     ]
 
     assert [reference.id for reference in unique_image_generation_references(references)] == ["asset-1", "asset-2"]
+    class DummyStorage:
+        def read_bytes(self, object_key: str, *, max_bytes: int) -> bytes:
+            assert max_bytes == 10 * 1024 * 1024
+            return {
+                "inspirations/p/ref.png": b"ref-bytes",
+                "inspirations/p/other.png": b"other-bytes",
+            }[object_key]
+
     payload = build_stored_image_reference_payload(
         references,
-        resolve_storage_path=lambda storage_path: Path("/storage") / storage_path,
+        storage=DummyStorage(),
+        max_bytes=10 * 1024 * 1024,
     )
-    assert payload.source_image == Path("/storage/inspirations/p/ref.png")
-    assert [reference.path for reference in payload.reference_images] == [
-        Path("/storage/inspirations/p/ref.png"),
-        Path("/storage/inspirations/p/other.png"),
-    ]
+    assert payload.source_image is not None
+    assert payload.source_image.bytes_data == b"ref-bytes"
+    assert payload.source_image.source_key == "inspirations/p/ref.png"
+    assert [reference.bytes_data for reference in payload.reference_images] == [b"ref-bytes", b"other-bytes"]
 
 
 def test_image_generation_core_merges_actual_size_metadata_without_dropping_provider_notes() -> None:

@@ -43,6 +43,7 @@ def _add_mock_config(
     enabled: bool = True,
     failure_threshold: int = 3,
     resource_group_id: str | None = DEFAULT_GENERATION_RESOURCE_GROUP_ID,
+    config: dict | None = None,
 ) -> GenerationConfig:
     return add_generation_config(
         session,
@@ -56,7 +57,7 @@ def _add_mock_config(
             if purpose == TEXT_PURPOSE
             else {"model": "mock-image"}
         ),
-        config={},
+        config=config or {},
         priority=priority,
         max_concurrency=max_concurrency,
         enabled=enabled,
@@ -214,6 +215,62 @@ def test_manual_disabled_config_raises_clear_error(db_session: Session) -> None:
 
     with pytest.raises(ValueError, match="手动指定的生成配置已停用"):
         claim_generation_config(db_session, purpose=TEXT_PURPOSE, generation_config_id=config.id)
+
+
+def test_claim_text_generation_config_requires_image_understanding_when_requested(db_session: Session) -> None:
+    ensure_provider_config_bootstrapped(db_session)
+    higher_priority_plain = _add_mock_config(
+        db_session,
+        purpose=TEXT_PURPOSE,
+        name="普通文案",
+        priority=300,
+        config={"supports_image_understanding": False},
+    )
+    image_aware = _add_mock_config(
+        db_session,
+        purpose=TEXT_PURPOSE,
+        name="带图文案",
+        priority=200,
+        config={"supports_image_understanding": True},
+    )
+
+    default_claim = claim_generation_config(db_session, purpose=TEXT_PURPOSE)
+    image_claim = claim_generation_config(db_session, purpose=TEXT_PURPOSE, require_image_understanding=True)
+
+    assert default_claim is not None
+    assert default_claim.generation_config_id == higher_priority_plain.id
+    assert image_claim is not None
+    assert image_claim.generation_config_id == image_aware.id
+
+
+def test_manual_text_generation_config_raises_when_image_understanding_is_required(db_session: Session) -> None:
+    config = _add_mock_config(
+        db_session,
+        purpose=TEXT_PURPOSE,
+        name="普通文案",
+        config={"supports_image_understanding": False},
+    )
+
+    with pytest.raises(ValueError, match="手动指定的生成配置不支持图片理解"):
+        claim_generation_config(
+            db_session,
+            purpose=TEXT_PURPOSE,
+            generation_config_id=config.id,
+            require_image_understanding=True,
+        )
+
+
+def test_auto_text_generation_config_raises_when_group_has_no_image_understanding_config(db_session: Session) -> None:
+    ensure_provider_config_bootstrapped(db_session)
+    _add_mock_config(
+        db_session,
+        purpose=TEXT_PURPOSE,
+        name="普通文案",
+        config={"supports_image_understanding": False},
+    )
+
+    with pytest.raises(ValueError, match="当前供应商生成分组没有支持图片理解的文案生成配置"):
+        claim_generation_config(db_session, purpose=TEXT_PURPOSE, require_image_understanding=True)
 
 
 def test_disabled_provider_makes_generation_config_effectively_unavailable(db_session: Session) -> None:

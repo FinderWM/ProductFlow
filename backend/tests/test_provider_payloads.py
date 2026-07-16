@@ -10,6 +10,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 from helpers import (
+    _enable_text_generation_configs_image_understanding as _enable_text_image_understanding_for_session,
+)
+from helpers import (
     _execute_workflow_queue_inline,
     _login,
     _make_demo_image_bytes,
@@ -89,6 +92,50 @@ REMOVED_COPY_OUTPUT_KEYS = [
     "poster" + "_headline",
     "c" + "ta",
 ]
+
+
+def _reference_image_input(
+    *,
+    filename: str = "reference.png",
+    mime_type: str = "image/png",
+    label: str | None = None,
+    role: str | None = None,
+    source_key: str | None = None,
+    bytes_data: bytes | None = None,
+) -> ReferenceImageInput:
+    return ReferenceImageInput(
+        bytes_data=bytes_data or _make_demo_image_bytes(),
+        mime_type=mime_type,
+        filename=filename,
+        label=label,
+        role=role,
+        source_key=source_key or filename,
+    )
+
+
+def _inspiration_input(
+    *,
+    name: str = "通勤杯",
+    category: str | None = "杯具",
+    price: str | None = "99",
+    source_note: str | None = "轻量杯身",
+    source_image: ReferenceImageInput | None = None,
+) -> InspirationInput:
+    return InspirationInput(
+        name=name,
+        category=category,
+        price=price,
+        source_note=source_note,
+        source_image=source_image,
+    )
+
+
+def _enable_text_generation_configs_image_understanding() -> None:
+    session = get_session_factory()()
+    try:
+        _enable_text_image_understanding_for_session(session)
+    finally:
+        session.close()
 
 
 def test_openai_client_kwargs_include_default_timeout() -> None:
@@ -269,6 +316,8 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
 
     monkeypatch.setattr("inspiration_one_backend.infrastructure.text.openai_provider.OpenAI", DummyTextOpenAI)
 
+    source_image = _reference_image_input(filename="prompt-provider-source.png", label="灵感主图")
+
     text_provider = OpenAITextProvider(
         ResolvedTextProviderConfig(
             provider_kind="openai",
@@ -277,12 +326,12 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
             api_key="super-secret-text-key",
         )
     )
-    inspiration_input = InspirationInput(
+    inspiration_input = _inspiration_input(
         name="测试灵感产物",
         category="类目",
         price="9.90",
         source_note="说明",
-        image_path="/tmp/a.png",
+        source_image=source_image,
     )
     brief, _ = text_provider.generate_brief(inspiration_input)
     text_provider.generate_copy(inspiration_input, brief)
@@ -296,12 +345,11 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
     ]
     assert text_calls[0]["instructions"] == "自定义灵感产物理解提示"
     assert text_calls[0]["input"][0]["role"] == "user"
+    assert [item["type"] for item in text_calls[0]["input"][0]["content"]] == ["input_text", "input_image"]
     assert text_calls[1]["instructions"] == "自定义文案提示"
     assert text_calls[1]["input"][0]["role"] == "user"
+    assert [item["type"] for item in text_calls[1]["input"][0]["content"]] == ["input_text", "input_image"]
 
-    source_path = configured_env / "prompt-provider-source.png"
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_bytes(_make_demo_image_bytes())
     poster_prompt = OpenAIResponsesImageProvider()._build_prompt(
         PosterGenerationInput(
             inspiration_name="测试灵感产物",
@@ -310,7 +358,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
             source_note="说明",
             instruction="强调轻便",
             structured_copy_context="摘要：主标题\n卖点：卖点一\n卖点：卖点二\n卖点：卖点三",
-            source_image=source_path,
+            source_image=source_image,
         ),
         PosterKind.MAIN_IMAGE,
         "1024x1024",
@@ -328,7 +376,7 @@ def test_prompt_settings_reach_provider_prompt_builders(configured_env: Path, mo
             price="9.90",
             source_note="说明",
             instruction="改成白底，保留主体",
-            source_image=source_path,
+            source_image=source_image,
         ),
         PosterKind.MAIN_IMAGE,
         "1024x1024",
@@ -401,7 +449,7 @@ def test_openai_responses_text_provider_sends_structured_output_text_format(
             structured_output=TextStructuredOutputConfig(enabled=True, mode="json_schema"),
         )
     )
-    inspiration = InspirationInput(name="通勤杯", category="杯具", price="99", source_note="轻量杯身", image_path="")
+    inspiration = _inspiration_input(source_image=None)
 
     brief, _ = provider.generate_brief(inspiration)
     copy_payload, _ = provider.generate_copy(inspiration, brief)
@@ -601,7 +649,7 @@ def test_openai_chat_completions_text_provider_sends_response_format_for_structu
             structured_output=TextStructuredOutputConfig(enabled=True, mode="json_object"),
         )
     )
-    inspiration = InspirationInput(name="通勤杯", category="杯具", price="99", source_note="轻量杯身", image_path="")
+    inspiration = _inspiration_input(source_image=None)
 
     brief, _ = provider.generate_brief(inspiration)
     copy_payload, _ = provider.generate_copy(inspiration, brief)
@@ -681,7 +729,7 @@ def test_openai_chat_completions_text_provider_sends_json_schema_response_format
     )
 
     brief, _ = provider.generate_brief(
-        InspirationInput(name="通勤杯", category="杯具", price="99", source_note="轻量杯身", image_path="")
+        _inspiration_input(source_image=None)
     )
 
     assert brief.positioning == "通勤保温杯"
@@ -692,6 +740,7 @@ def test_openai_chat_completions_text_provider_sends_json_schema_response_format
 
 
 def test_openai_chat_completions_text_provider_reads_sse_despite_stream_false(
+    configured_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     responses = [
@@ -765,12 +814,8 @@ def test_openai_chat_completions_text_provider_reads_sse_despite_stream_false(
         )
     )
 
-    inspiration = InspirationInput(
-        name="通勤杯",
-        category="杯具",
-        price="99",
-        source_note="轻量杯身",
-        image_path="/tmp/source.png",
+    inspiration = _inspiration_input(
+        source_image=_reference_image_input(filename="chat-completions-source.png", label="灵感主图"),
     )
     brief, brief_model = provider.generate_brief(inspiration)
     copy_payload, copy_model = provider.generate_copy(inspiration, brief)
@@ -786,6 +831,8 @@ def test_openai_chat_completions_text_provider_reads_sse_despite_stream_false(
         "https://gateway.example/v1/chat/completions",
         "https://gateway.example/v1/chat/completions",
     ]
+    assert [item["type"] for item in calls[0]["json"]["messages"][1]["content"]] == ["text", "image_url"]
+    assert [item["type"] for item in calls[1]["json"]["messages"][1]["content"]] == ["text", "image_url"]
 
 
 def test_openai_chat_completions_text_provider_normalizes_loose_copy_json(
@@ -860,7 +907,7 @@ def test_openai_chat_completions_text_provider_normalizes_loose_copy_json(
         )
     )
 
-    inspiration = InspirationInput(name="通勤杯", category="杯具", price="99", source_note="轻量杯身", image_path="")
+    inspiration = _inspiration_input(source_image=None)
     brief, _ = provider.generate_brief(inspiration)
     copy_payload, _ = provider.generate_copy(inspiration, brief, CopyNodeConfigV2(purpose="main_image"))
 
@@ -1263,6 +1310,7 @@ def test_inspiration_workflow_copy_run_normalizes_provider_scalar_lists(configur
     app = create_app()
     client = TestClient(app)
     _login(client)
+    _enable_text_generation_configs_image_understanding()
 
     created = client.post(
         "/api/inspirations",
@@ -1358,6 +1406,7 @@ def test_inspiration_workflow_copy_run_retries_provider_payload_contract_mismatc
     app = create_app()
     client = TestClient(app)
     _login(client)
+    _enable_text_generation_configs_image_understanding()
 
     created = client.post(
         "/api/inspirations",
@@ -1384,9 +1433,7 @@ def test_mock_image_provider_does_not_read_runtime_settings_during_generation(
 ) -> None:
     from inspiration_one_backend.infrastructure.image.mock_provider import MockImageProvider
 
-    source_path = configured_env / "mock-thread-safe-source.png"
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_bytes(_make_demo_image_bytes())
+    source_image = _reference_image_input(filename="mock-thread-safe-source.png", label="灵感主图")
     provider = MockImageProvider()
 
     def fail_runtime_settings_lookup():
@@ -1405,7 +1452,7 @@ def test_mock_image_provider_does_not_read_runtime_settings_during_generation(
             source_note="测试说明",
             instruction="生成测试图",
             structured_copy_context="摘要：测试主标题\n卖点：卖点一\n卖点：卖点二\n卖点：卖点三",
-            source_image=source_path,
+            source_image=source_image,
             image_size="512x512",
         ),
         PosterKind.MAIN_IMAGE,
@@ -1708,11 +1755,8 @@ def test_openai_responses_poster_provider_uses_image_generation_tool(
 
     monkeypatch.setattr("inspiration_one_backend.infrastructure.image.responses_provider.OpenAI", DummyOpenAI)
 
-    source_path = configured_env / "provider-source.png"
-    reference_path = configured_env / "provider-reference.png"
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_bytes(_make_demo_image_bytes())
-    reference_path.write_bytes(_make_demo_image_bytes())
+    source_image = _reference_image_input(filename="provider-source.png", label="灵感主图")
+    reference_image = _reference_image_input(filename="reference.png", label="reference.png")
 
     provider = OpenAIResponsesImageProvider()
     generated_image, model_name = provider.generate_poster_image(
@@ -1725,14 +1769,8 @@ def test_openai_responses_poster_provider_uses_image_generation_tool(
             image_size="1536x1024",
             tool_options={"quality": "high", "output_format": "webp"},
             structured_copy_context="摘要：测试海报标题\n卖点：卖点1\n卖点：卖点2\n卖点：卖点3",
-            source_image=source_path,
-            reference_images=[
-                ReferenceImageInput(
-                    path=reference_path,
-                    mime_type="image/png",
-                    filename="reference.png",
-                )
-            ],
+            source_image=source_image,
+            reference_images=[reference_image],
         ),
         kind=PosterKind.MAIN_IMAGE,
     )
@@ -3016,11 +3054,8 @@ def test_openai_images_poster_provider_uses_existing_prompt_contract_and_referen
     finally:
         session.close()
 
-    source_path = configured_env / "images-source.png"
-    reference_path = configured_env / "images-reference.png"
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_bytes(_make_demo_image_bytes())
-    reference_path.write_bytes(_make_demo_image_bytes())
+    source_image = _reference_image_input(filename="images-source.png", label="灵感主图")
+    reference_image = _reference_image_input(filename="reference.png", label="reference.png")
 
     generated_image, model_name = OpenAIImagesImageProvider().generate_poster_image(
         poster=PosterGenerationInput(
@@ -3031,14 +3066,8 @@ def test_openai_images_poster_provider_uses_existing_prompt_contract_and_referen
             source_note="防水牛津布",
             instruction="背景更干净",
             image_size="1024x1024",
-            source_image=source_path,
-            reference_images=[
-                ReferenceImageInput(
-                    path=reference_path,
-                    mime_type="image/png",
-                    filename="reference.png",
-                )
-            ],
+            source_image=source_image,
+            reference_images=[reference_image],
         ),
         kind=PosterKind.MAIN_IMAGE,
     )
@@ -3124,6 +3153,8 @@ def test_generated_poster_mode_uses_image_provider(
             (_make_demo_image_bytes(), "ref-2.png", "image/png"),
         ],
     )
+    _enable_text_image_understanding_for_session(db_session, commit=False)
+    db_session.commit()
 
     run_inspiration_workflow(db_session, inspiration_id=inspiration.id)
     db_session.expire_all()

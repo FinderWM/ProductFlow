@@ -363,6 +363,7 @@ class TextGenerationConfigTestCopyRequest(BaseModel):
 class TextGenerationConfigTestRequest(BaseModel):
     generation_config_id: str | None = Field(default=None, max_length=36)
     generation_config: GenerationConfigCreateRequest | None = None
+    reference_asset_ids: list[str] = Field(default_factory=list)
     inspiration: TextGenerationConfigTestInspirationRequest = Field(
         default_factory=TextGenerationConfigTestInspirationRequest
     )

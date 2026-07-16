@@ -17,6 +17,7 @@ from inspiration_one_backend.application.contracts import (
 )
 from inspiration_one_backend.application.copy_payloads import normalize_copy_payload
 from inspiration_one_backend.config import get_runtime_settings
+from inspiration_one_backend.infrastructure.image.base import encode_reference_image
 from inspiration_one_backend.infrastructure.openai_client import build_openai_client_kwargs
 from inspiration_one_backend.infrastructure.openai_response_parsing import (
     read_json_object_from_response,
@@ -33,6 +34,8 @@ from inspiration_one_backend.infrastructure.text.prompt_context import (
     COPY_SYSTEM_FALLBACK,
     build_brief_user_content,
     build_copy_user_content,
+    copy_context_reference_images,
+    inspiration_source_image_input,
 )
 from inspiration_one_backend.infrastructure.text.structured_output import (
     BRIEF_SCHEMA,
@@ -89,18 +92,35 @@ class OpenAITextProvider(TextProvider):
             payload["text"] = text_config
         return self.client.responses.create(**payload)
 
+    def _responses_user_message(
+        self,
+        *,
+        content: str,
+        reference_images: list[ReferenceImageInput] | None = None,
+    ) -> dict:
+        references = reference_images or []
+        if not references:
+            return {"role": "user", "content": content}
+        message_content: list[dict[str, str]] = [{"type": "input_text", "text": content}]
+        message_content.extend(
+            {"type": "input_image", "image_url": encode_reference_image(reference)}
+            for reference in references
+        )
+        return {"role": "user", "content": message_content}
+
     def _read_output_json(self, response) -> dict:
         return read_json_object_from_response(response, error_label="文案 provider")
 
     def generate_brief(self, inspiration: InspirationInput) -> tuple[CreativeBriefPayload, str]:
+        source_image = inspiration_source_image_input(inspiration)
         response = self._responses_create(
             model=self.brief_model,
             instructions=text_or_default(self.brief_system_prompt, BRIEF_SYSTEM_FALLBACK),
             input=[
-                {
-                    "role": "user",
-                    "content": build_brief_user_content(inspiration),
-                },
+                self._responses_user_message(
+                    content=build_brief_user_content(inspiration),
+                    reference_images=[source_image] if source_image is not None else [],
+                ),
             ],
             structured_schema=BRIEF_SCHEMA,
         )
@@ -115,15 +135,15 @@ class OpenAITextProvider(TextProvider):
         reference_images: list[ReferenceImageInput] | None = None,
     ) -> tuple[CopyPayloadV2, str]:
         config = config or CopyNodeConfigV2()
-        reference_images = reference_images or []
+        reference_images = copy_context_reference_images(inspiration, reference_images)
         response = self._responses_create(
             model=self.copy_model,
             instructions=text_or_default(self.copy_system_prompt, COPY_SYSTEM_FALLBACK),
             input=[
-                {
-                    "role": "user",
-                    "content": build_copy_user_content(inspiration, brief, config, reference_images),
-                },
+                self._responses_user_message(
+                    content=build_copy_user_content(inspiration, brief, config, reference_images),
+                    reference_images=reference_images,
+                ),
             ],
             structured_schema=COPY_SCHEMA,
         )
@@ -172,9 +192,8 @@ class OpenAITextProvider(TextProvider):
                 "把输入拆成多条彼此独立、适合后续单独生图的方向。只输出 JSON 对象。",
             ),
             input=[
-                {
-                    "role": "user",
-                    "content": (
+                self._responses_user_message(
+                    content=(
                         f"灵感产物名：{payload.inspiration_name}\n"
                         f"类目：{payload.category or '未提供'}\n"
                         f"价格：{payload.price or '未提供'}\n"
@@ -194,7 +213,8 @@ class OpenAITextProvider(TextProvider):
                         '5. source_refs 必须是字符串数组，例如 ["入口长文本：正视图", "参考图 1"]；'
                         "没有来源时输出 []。"
                     ),
-                },
+                    reference_images=payload.reference_images,
+                ),
             ],
             structured_schema=TAIL_SPLIT_SCHEMA,
         )

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from inspiration_one_backend.application.contracts import PosterGenerationInput, ReferenceImageInput
 from inspiration_one_backend.domain.enums import PosterKind
+from inspiration_one_backend.domain.image_media import image_suffix_for_mime_type
 
 
 class GeneratedImagePayload(BaseModel):
@@ -50,17 +51,15 @@ def decode_b64_image(data: str) -> bytes:
 
 
 def encode_reference_image(reference: ReferenceImageInput) -> str:
-    raw = reference.path.read_bytes()
-    encoded = b64encode(raw).decode("utf-8")
+    encoded = b64encode(reference.bytes_data).decode("utf-8")
     return f"data:{reference.mime_type};base64,{encoded}"
 
 
 def infer_extension(mime_type: str) -> str:
-    return {
-        "image/png": ".png",
-        "image/jpeg": ".jpg",
-        "image/webp": ".webp",
-    }.get(mime_type, ".bin")
+    try:
+        return image_suffix_for_mime_type(mime_type)
+    except ValueError:
+        return ".bin"
 
 
 def image_dimensions_from_bytes(bytes_data: bytes) -> tuple[int, int] | None:

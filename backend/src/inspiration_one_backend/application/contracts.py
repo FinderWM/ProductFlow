@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
-from pathlib import Path
+from hashlib import sha256
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
@@ -43,7 +44,7 @@ class InspirationInput(BaseModel):
     category: str | None = None
     price: str | None = None
     source_note: str | None = None
-    image_path: str
+    source_image: ReferenceImageInput | None = None
 
 
 class CreativeBriefPayload(BaseModel):
@@ -211,11 +212,58 @@ class PosterRenderResult(BaseModel):
 class ReferenceImageInput(BaseModel):
     """海报渲染/生成需要的参考图信息。"""
 
-    path: Path
+    bytes_data: bytes = Field(repr=False, exclude=True)
     mime_type: str
     filename: str
     role: str | None = None
     label: str | None = None
+    source_key: str | None = None
+
+    @field_validator("mime_type", "filename")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("参考图 mime_type/filename 不能为空")
+        return value
+
+    @field_validator("role", "label", "source_key")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+def reference_image_identity(reference: ReferenceImageInput) -> str:
+    if reference.source_key:
+        return f"source:{reference.source_key}"
+    return f"bytes:{sha256(reference.bytes_data).hexdigest()}"
+
+
+def unique_reference_image_inputs(
+    reference_images: Iterable[ReferenceImageInput],
+) -> list[ReferenceImageInput]:
+    unique: list[ReferenceImageInput] = []
+    seen: set[str] = set()
+    for reference in reference_images:
+        identity = reference_image_identity(reference)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(reference)
+    return unique
+
+
+def merge_reference_image_inputs(
+    source_image: ReferenceImageInput | None,
+    reference_images: list[ReferenceImageInput] | None = None,
+) -> list[ReferenceImageInput]:
+    merged: list[ReferenceImageInput] = []
+    if source_image is not None:
+        merged.append(source_image)
+    merged.extend(reference_images or [])
+    return unique_reference_image_inputs(merged)
 
 
 class TailSplitterConfig(BaseModel):
@@ -491,5 +539,5 @@ class PosterGenerationInput(BaseModel):
     image_size: str | None = None
     tool_options: dict[str, Any] | None = None
     structured_copy_context: str | None = None
-    source_image: Path | None = None
+    source_image: ReferenceImageInput | None = None
     reference_images: list[ReferenceImageInput] = Field(default_factory=list)

@@ -8,17 +8,33 @@ from fastapi import HTTPException, UploadFile, status
 from PIL import Image, UnidentifiedImageError
 
 from inspiration_one_backend.config import get_runtime_settings
+from inspiration_one_backend.domain.image_media import (
+    image_suffix_for_mime_type,
+    safe_image_delivery_filename,
+    safe_image_display_filename,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class ValidatedUpload:
     content: bytes
-    filename: str
+    original_filename: str
     mime_type: str
+    storage_suffix: str
+    delivery_filename: str
+
+    @property
+    def filename(self) -> str:
+        """Compatibility alias for application records that store the display filename."""
+
+        return self.original_filename
 
 
 @dataclass(frozen=True, slots=True)
-class ValidatedTextDocumentUpload(ValidatedUpload):
+class ValidatedTextDocumentUpload:
+    content: bytes
+    filename: str
+    mime_type: str
     text: str
 
 
@@ -47,7 +63,7 @@ _MAX_TEXT_DOCUMENT_BYTES = 1_000_000
 async def read_validated_image_upload(upload: UploadFile, *, fallback_filename: str) -> ValidatedUpload:
     """校验上传图片：MIME 类型 / 大小 / 像素 / 内容格式一致性。"""
     settings = get_runtime_settings()
-    filename = upload.filename or fallback_filename
+    filename = safe_image_display_filename(upload.filename, fallback=fallback_filename)
     declared_mime = (upload.content_type or "application/octet-stream").split(";", maxsplit=1)[0].strip().lower()
     if declared_mime not in settings.allowed_image_mime_types:
         raise HTTPException(
@@ -83,7 +99,13 @@ async def read_validated_image_upload(upload: UploadFile, *, fallback_filename: 
     if detected_mime != declared_mime:
         raise HTTPException(status_code=400, detail="图片内容格式与 Content-Type 不一致")
 
-    return ValidatedUpload(content=content, filename=filename, mime_type=detected_mime)
+    return ValidatedUpload(
+        content=content,
+        original_filename=filename,
+        mime_type=detected_mime,
+        storage_suffix=image_suffix_for_mime_type(detected_mime),
+        delivery_filename=safe_image_delivery_filename(filename, detected_mime, fallback=fallback_filename),
+    )
 
 
 def validate_reference_image_count(count: int) -> None:

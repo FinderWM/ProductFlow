@@ -19,6 +19,7 @@ from inspiration_one_backend.application.contracts import (
 )
 from inspiration_one_backend.application.copy_payloads import normalize_copy_payload
 from inspiration_one_backend.config import get_runtime_settings
+from inspiration_one_backend.infrastructure.image.base import encode_reference_image
 from inspiration_one_backend.infrastructure.openai_client import (
     OPENAI_COMPATIBLE_DEFAULT_HEADERS,
     OPENAI_COMPATIBLE_DEFAULT_TIMEOUT_SECONDS,
@@ -38,6 +39,8 @@ from inspiration_one_backend.infrastructure.text.prompt_context import (
     COPY_SYSTEM_FALLBACK,
     build_brief_user_content,
     build_copy_user_content,
+    copy_context_reference_images,
+    inspiration_source_image_input,
 )
 from inspiration_one_backend.infrastructure.text.structured_output import (
     BRIEF_SCHEMA,
@@ -89,7 +92,7 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
         *,
         model: str,
         instructions: str,
-        content: str,
+        content: str | list[dict[str, Any]],
         structured_schema: TextStructuredOutputSchema,
     ) -> str:
         if not self.api_key:
@@ -122,6 +125,25 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
             response.raise_for_status()
         return self._response_text(response)
 
+    def _chat_completion_user_content(
+        self,
+        *,
+        content: str,
+        reference_images: list[ReferenceImageInput] | None = None,
+    ) -> str | list[dict[str, Any]]:
+        references = reference_images or []
+        if not references:
+            return content
+        message_content: list[dict[str, Any]] = [{"type": "text", "text": content}]
+        message_content.extend(
+            {
+                "type": "image_url",
+                "image_url": {"url": encode_reference_image(reference)},
+            }
+            for reference in references
+        )
+        return message_content
+
     def _response_text(self, response: httpx.Response) -> str:
         content_type = response.headers.get("content-type", "")
         text = response.text
@@ -136,10 +158,14 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
         return read_json_object_from_response(response, error_label="文案 Chat Completions provider")
 
     def generate_brief(self, inspiration: InspirationInput) -> tuple[CreativeBriefPayload, str]:
+        source_image = inspiration_source_image_input(inspiration)
         response_text = self._chat_completion(
             model=self.brief_model,
             instructions=text_or_default(self.brief_system_prompt, BRIEF_SYSTEM_FALLBACK),
-            content=build_brief_user_content(inspiration),
+            content=self._chat_completion_user_content(
+                content=build_brief_user_content(inspiration),
+                reference_images=[source_image] if source_image is not None else [],
+            ),
             structured_schema=BRIEF_SCHEMA,
         )
         payload = CreativeBriefPayload.model_validate(self._read_output_json(response_text))
@@ -153,11 +179,14 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
         reference_images: list[ReferenceImageInput] | None = None,
     ) -> tuple[CopyPayloadV2, str]:
         config = config or CopyNodeConfigV2()
-        reference_images = reference_images or []
+        reference_images = copy_context_reference_images(inspiration, reference_images)
         response_text = self._chat_completion(
             model=self.copy_model,
             instructions=text_or_default(self.copy_system_prompt, COPY_SYSTEM_FALLBACK),
-            content=build_copy_user_content(inspiration, brief, config, reference_images),
+            content=self._chat_completion_user_content(
+                content=build_copy_user_content(inspiration, brief, config, reference_images),
+                reference_images=reference_images,
+            ),
             structured_schema=COPY_SCHEMA,
         )
         raw_payload = self._read_output_json(response_text)
@@ -203,25 +232,28 @@ class OpenAIChatCompletionsTextProvider(TextProvider):
                 self.tail_split_system_prompt,
                 "把输入拆成多条彼此独立、适合后续单独生图的方向。只输出 JSON 对象。",
             ),
-            content=(
-                f"灵感产物名：{payload.inspiration_name}\n"
-                f"类目：{payload.category or '未提供'}\n"
-                f"价格：{payload.price or '未提供'}\n"
-                f"灵感产物描述/补充说明：{payload.source_note or '未提供'}\n"
-                f"粘贴长文本：{payload.source_text or '未提供'}\n"
-                f"尾巴节点描述：{payload.description or '未提供'}\n"
-                f"上游文案上下文：\n{upstream_text or '未提供'}\n"
-                f"参考图：\n{chr(10).join(reference_lines) if reference_lines else '未提供'}\n"
-                f"最多拆分项：{payload.max_items}\n"
-                "请输出字段：source_summary、items。\n"
-                "items 为数组，每项包含 title、instruction、visual_intent、source_refs。\n"
-                "要求：\n"
-                "1. 最多拆分项是数量上限，不是必须输出的数量；请按实际内容输出 1 到该上限之间的合理数量；\n"
-                "2. 不要为了填满上限硬拆，也不要把同一画面目标改写成多个 item；\n"
-                "3. instruction 必须是可直接用于后续生图触发器的完整中文提示词；\n"
-                "4. 每个 item 聚焦不同画面目标，不要只是同义改写；\n"
-                '5. source_refs 必须是字符串数组，例如 ["入口长文本：正视图", "参考图 1"]；'
-                "没有来源时输出 []。"
+            content=self._chat_completion_user_content(
+                content=(
+                    f"灵感产物名：{payload.inspiration_name}\n"
+                    f"类目：{payload.category or '未提供'}\n"
+                    f"价格：{payload.price or '未提供'}\n"
+                    f"灵感产物描述/补充说明：{payload.source_note or '未提供'}\n"
+                    f"粘贴长文本：{payload.source_text or '未提供'}\n"
+                    f"尾巴节点描述：{payload.description or '未提供'}\n"
+                    f"上游文案上下文：\n{upstream_text or '未提供'}\n"
+                    f"参考图：\n{chr(10).join(reference_lines) if reference_lines else '未提供'}\n"
+                    f"最多拆分项：{payload.max_items}\n"
+                    "请输出字段：source_summary、items。\n"
+                    "items 为数组，每项包含 title、instruction、visual_intent、source_refs。\n"
+                    "要求：\n"
+                    "1. 最多拆分项是数量上限，不是必须输出的数量；请按实际内容输出 1 到该上限之间的合理数量；\n"
+                    "2. 不要为了填满上限硬拆，也不要把同一画面目标改写成多个 item；\n"
+                    "3. instruction 必须是可直接用于后续生图触发器的完整中文提示词；\n"
+                    "4. 每个 item 聚焦不同画面目标，不要只是同义改写；\n"
+                    '5. source_refs 必须是字符串数组，例如 ["入口长文本：正视图", "参考图 1"]；'
+                    "没有来源时输出 []。"
+                ),
+                reference_images=payload.reference_images,
             ),
             structured_schema=TAIL_SPLIT_SCHEMA,
         )

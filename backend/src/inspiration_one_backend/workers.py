@@ -15,6 +15,13 @@ from inspiration_one_backend.application.inspiration_workflows import (
     execute_inspiration_workflow_node_run,
     execute_inspiration_workflow_run,
 )
+from inspiration_one_backend.application.storage_variants import (
+    STORAGE_VARIANT_MAX_RETRIES,
+    STORAGE_VARIANT_RETRY_MAX_BACKOFF_MS,
+    STORAGE_VARIANT_RETRY_MIN_BACKOFF_MS,
+    STORAGE_VARIANT_WORKER_TIME_LIMIT_MS,
+    execute_storage_image_variants,
+)
 from inspiration_one_backend.config import get_runtime_settings
 from inspiration_one_backend.domain.durable_generation_tasks import (
     IMAGE_SESSION_GENERATION_TASK_CONTRACT,
@@ -38,6 +45,12 @@ from inspiration_one_backend.infrastructure.queue import (
     recover_unfinished_image_session_generation_tasks,
     recover_unfinished_image_to_code_jobs,
     recover_unfinished_workflow_runs,
+)
+from inspiration_one_backend.infrastructure.storage import (
+    InvalidStorageObjectKey,
+    StorageObjectNotFound,
+    StorageObjectTooLarge,
+    StorageUnavailable,
 )
 
 configure_logging()
@@ -104,6 +117,29 @@ def run_enhance_job(job_id: str) -> None:
 def run_image_to_code_job(job_id: str) -> None:
     """图片转代码 worker：执行分析、静态网页产出和 Figma 导出。"""
     execute_image_to_code_job(job_id)
+
+
+@dramatiq.actor(
+    max_retries=STORAGE_VARIANT_MAX_RETRIES,
+    min_backoff=STORAGE_VARIANT_RETRY_MIN_BACKOFF_MS,
+    max_backoff=STORAGE_VARIANT_RETRY_MAX_BACKOFF_MS,
+    time_limit=STORAGE_VARIANT_WORKER_TIME_LIMIT_MS,
+)
+def run_storage_image_variants(object_key: str) -> None:
+    """为已持久化原图幂等生成 preview/thumbnail。"""
+    try:
+        execute_storage_image_variants(object_key)
+    except StorageObjectNotFound:
+        logger.info("图片变体原图不存在，停止重试: object_key=%s", object_key)
+    except InvalidStorageObjectKey:
+        logger.warning("图片变体对象 key 无效，停止重试: object_key=%s", object_key)
+    except StorageObjectTooLarge:
+        logger.warning("图片变体原图超过读取上限，停止重试: object_key=%s", object_key)
+    except ValueError:
+        logger.warning("图片变体原图不可解码，停止重试: object_key=%s", object_key)
+    except StorageUnavailable:
+        logger.warning("图片变体存储暂不可用，交由有限重试: object_key=%s", object_key)
+        raise
 
 
 assert_actor_uses_durable_generation_contract(WORKFLOW_RUN_GENERATION_TASK_CONTRACT, run_inspiration_workflow_run)
