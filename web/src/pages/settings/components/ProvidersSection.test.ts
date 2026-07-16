@@ -1,10 +1,13 @@
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import appCss from "../../../index.css?raw";
 import type { ProviderProfile } from "../../../lib/types";
 import { EMPTY_PROVIDER_FORM } from "../providerForm";
 import { ProvidersSection } from "./ProvidersSection";
+
+const appCss = readFileSync(new URL("../../../index.css", import.meta.url), "utf8");
 
 function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
   return {
@@ -26,26 +29,26 @@ function providerProfile(overrides: Partial<ProviderProfile> = {}): ProviderProf
 
 function renderProvidersSection(workspaceSubpage: boolean): string {
   return renderToStaticMarkup(
-    <ProvidersSection
-      profiles={[
+    createElement(ProvidersSection, {
+      profiles: [
         providerProfile({ id: "enabled", name: "Enabled Provider" }),
         providerProfile({ id: "disabled", name: "Disabled Provider", enabled: false }),
-      ]}
-      profileForm={EMPTY_PROVIDER_FORM}
-      editingProfileId={null}
-      drawerOpen={false}
-      pending={false}
-      togglingProfileId={null}
-      canWrite
-      workspaceSubpage={workspaceSubpage}
-      onProfileFormChange={() => undefined}
-      onOpenCreate={() => undefined}
-      onEditProfile={() => undefined}
-      onCloseDrawer={() => undefined}
-      onSubmitProfile={() => undefined}
-      onDeleteProfile={() => undefined}
-      onToggleProfileEnabled={() => undefined}
-    />,
+      ],
+      profileForm: EMPTY_PROVIDER_FORM,
+      editingProfileId: null,
+      drawerOpen: false,
+      pending: false,
+      togglingProfileId: null,
+      canWrite: true,
+      workspaceSubpage,
+      onProfileFormChange: () => undefined,
+      onOpenCreate: () => undefined,
+      onEditProfile: () => undefined,
+      onCloseDrawer: () => undefined,
+      onSubmitProfile: () => undefined,
+      onDeleteProfile: () => undefined,
+      onToggleProfileEnabled: () => undefined,
+    }),
   );
 }
 
