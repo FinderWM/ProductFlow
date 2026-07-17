@@ -206,7 +206,7 @@ export function ImageSizePicker({
                 selectionMode="single"
                 name={aspectGroupName}
                 title={labelForImageAspect(option.value, locale)}
-                className="h-16 w-full items-center justify-center px-2 py-2 text-center text-xs font-semibold"
+                className="h-20 w-full !items-center justify-center px-2 py-2 text-center text-xs font-semibold"
                 onChange={(checked) => {
                   if (checked) {
                     selectAspect(option.value);
@@ -277,7 +277,7 @@ export function ImageSizePicker({
                   selectionMode="single"
                   name={resolutionGroupName}
                   title={formatImageSizeValue(option.value)}
-                  className="h-20 w-full items-center justify-center px-2 py-2 text-center text-xs font-semibold"
+                  className="h-20 w-full !items-center justify-center px-2 py-2 text-center text-xs font-semibold"
                   onChange={(checked) => {
                     if (checked) {
                       onChange(option.value);
