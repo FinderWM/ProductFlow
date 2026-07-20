@@ -16,12 +16,15 @@ import {
   renderActionButtonInner,
   type LayoutActionAppearance,
 } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { SkeletonCards } from "../components/loading/Skeleton";
 import { ModalShell } from "../components/ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../components/ResourceGovernance";
 import { ResourceGroupChipEditor } from "../components/ResourceGroupChipEditor";
 import { TopNav } from "../components/TopNav";
 import { WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import { asyncViewStateFromQuery, combineAsyncViewStates } from "../lib/asyncViewState";
 import { formatDateTime } from "../lib/format";
 import { useI18n } from "../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup } from "../lib/types";
@@ -467,6 +470,30 @@ function ResourceLibraryManagePage({
     queryFn: () => api.listResourceLibraryAssets({ group_id: selectedGroupId || null }),
   });
   const assets = assetsQuery.data?.items ?? EMPTY_RESOURCE_LIBRARY_ASSETS;
+  const resourceLibraryViewState = combineAsyncViewStates({
+    active: true,
+    critical: [
+      asyncViewStateFromQuery({
+        active: true,
+        data: groupsQuery.data,
+        dataUpdatedAt: groupsQuery.dataUpdatedAt,
+        isSuccess: groupsQuery.isSuccess,
+        isError: groupsQuery.isError,
+        fetchStatus: groupsQuery.fetchStatus,
+        isEmpty: () => false,
+      }),
+      asyncViewStateFromQuery({
+        active: true,
+        data: assetsQuery.data,
+        dataUpdatedAt: assetsQuery.dataUpdatedAt,
+        isSuccess: assetsQuery.isSuccess,
+        isError: assetsQuery.isError,
+        fetchStatus: assetsQuery.fetchStatus,
+        isEmpty: (data) => data.items.length === 0,
+      }),
+    ],
+    isEmpty: assets.length === 0,
+  });
 
   useEffect(() => {
     if (selectedGroupId && groupsQuery.isSuccess && !groups.some((group) => group.id === selectedGroupId)) {
@@ -614,11 +641,11 @@ function ResourceLibraryManagePage({
   });
 
   const assetCountLabel = useMemo(() => {
-    if (assetsQuery.isLoading) {
+    if (resourceLibraryViewState.content === "none" && resourceLibraryViewState.fetch === "fetching") {
       return t("resourceLibrary.loading");
     }
     return t("resourceLibrary.assetCount", { count: assets.length });
-  }, [assets.length, assetsQuery.isLoading, t]);
+  }, [assets.length, resourceLibraryViewState.content, resourceLibraryViewState.fetch, t]);
 
   useEffect(() => {
     if (!message) {
@@ -862,15 +889,52 @@ function ResourceLibraryManagePage({
                 />
               </div>
             </div>
-            {assetsQuery.isLoading || groupsQuery.isLoading ? (
-              <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 dark:border-slate-800 dark:bg-[#0f1726]">
-                <Loader2 size={24} className="animate-spin" />
-              </div>
-            ) : assetsQuery.isError || groupsQuery.isError ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-                {t("resourceLibrary.loadFailed")}
-              </div>
-            ) : assets.length ? (
+            <AsyncContent
+              state={resourceLibraryViewState}
+              refreshIntent="parameter-change"
+              loadingLabel={t("resourceLibrary.loading")}
+              skeleton={<SkeletonCards count={6} />}
+              inactive={<SkeletonCards count={6} />}
+              initialError={(
+                <AsyncErrorState
+                  title={t("resourceLibrary.loadFailed")}
+                  retryLabel={t("common.retry")}
+                  retryingLabel={t("app.loading")}
+                  retrying={resourceLibraryViewState.fetch === "fetching"}
+                  onRetry={() => {
+                    void Promise.all([groupsQuery.refetch(), assetsQuery.refetch()]);
+                  }}
+                />
+              )}
+              paused={(
+                <AsyncPausedState
+                  title={t("app.requestPaused.title")}
+                  message={t("app.requestPaused.message")}
+                  retryLabel={t("common.retry")}
+                  onRetry={() => {
+                    void Promise.all([groupsQuery.refetch(), assetsQuery.refetch()]);
+                  }}
+                />
+              )}
+              empty={(
+                <div className="flex min-h-[360px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-400">
+                  <Trees size={24} className="text-emerald-600 dark:text-emerald-300" />
+                  <div>{t("resourceLibrary.empty")}</div>
+                </div>
+              )}
+              refreshFeedback={resourceLibraryViewState.error === "refresh" ? (
+                <AsyncErrorState
+                  className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                  title={t("resourceLibrary.loadFailed")}
+                  retryLabel={t("common.retry")}
+                  retryingLabel={t("app.loading")}
+                  retrying={resourceLibraryViewState.fetch === "fetching"}
+                  onRetry={() => {
+                    void Promise.all([groupsQuery.refetch(), assetsQuery.refetch()]);
+                  }}
+                />
+              ) : null}
+            >
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {assets.map((asset) => {
                   const draftGroupIds = assetGroupDrafts[asset.id] ?? groupIdsForAsset(asset, groups);
@@ -981,12 +1045,7 @@ function ResourceLibraryManagePage({
                   );
                 })}
               </div>
-            ) : (
-              <div className="flex min-h-[360px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-[#0f1726] dark:text-slate-400">
-                <Trees size={24} className="text-emerald-600 dark:text-emerald-300" />
-                <div>{t("resourceLibrary.empty")}</div>
-              </div>
-            )}
+            </AsyncContent>
           </section>
         </div>
           </div>

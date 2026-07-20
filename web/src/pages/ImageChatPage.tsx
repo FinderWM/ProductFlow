@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "vaul";
 import {
@@ -16,6 +16,7 @@ import {
   Menu,
   Pencil,
   Plus,
+  RefreshCw,
   Save,
   Settings,
   Sparkles,
@@ -34,6 +35,8 @@ import { MediaPreviewTrigger } from "../components/MediaPreviewTrigger";
 import { ModalShell } from "../components/ModalShell";
 import { ParameterHelpLabel } from "../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../components/PromptPreviewDialog";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { Skeleton } from "../components/loading/Skeleton";
 import {
   actionButtonClassNameForAppearance,
   actionButtonComponentForAppearance,
@@ -68,6 +71,11 @@ import {
   WorkspaceTextarea,
 } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import {
+  asyncViewPhase,
+  asyncViewStateFromQuery,
+  combineAsyncViewStates,
+} from "../lib/asyncViewState";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { compositeEnhanceTiles, estimateEnhanceTileCallCount } from "../lib/enhanceCompositor";
 import { formatDateTime } from "../lib/format";
@@ -280,6 +288,27 @@ function assertImageChatActionAllowed(blockedTitle: string | null) {
 
 interface ImageChatPageProps {
   mode?: "auto" | "workbench";
+}
+
+function ImageChatSettingsSkeleton() {
+  return (
+    <div className="space-y-5" aria-hidden="true">
+      <div className="space-y-3">
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+      {[1, 2, 3].map((section) => (
+        <div key={section} className="space-y-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-700/80">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-24 w-full" rounded="lg" />
+          <div className="grid grid-cols-2 gap-2">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function ImageChatPage(props: ImageChatPageProps = {}) {
@@ -551,6 +580,7 @@ function ImageChatWorkbenchPage() {
     isAdmin ? selectedSessionOwnerUserId : "",
     isAdmin && onlyDeletedSessions,
   ] as const;
+  const sessionListActive = selectedSessionResourceGroupId !== null && (!isAdmin || sessionOwnerFilterInitialized);
   const sessionsQuery = useQuery({
     queryKey: sessionListQueryKey,
     queryFn: () =>
@@ -559,8 +589,18 @@ function ImageChatWorkbenchPage() {
         owner_user_id: isAdmin ? selectedSessionOwnerUserId || undefined : undefined,
         only_deleted: isAdmin && onlyDeletedSessions,
       }),
-    enabled: selectedSessionResourceGroupId !== null && (!isAdmin || sessionOwnerFilterInitialized),
+    enabled: sessionListActive,
   });
+  const sessionListState = asyncViewStateFromQuery({
+    active: sessionListActive,
+    data: sessionsQuery.data,
+    dataUpdatedAt: sessionsQuery.dataUpdatedAt,
+    isSuccess: sessionsQuery.isSuccess,
+    isError: sessionsQuery.isError,
+    fetchStatus: sessionsQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const sessionListPhase = asyncViewPhase(sessionListState);
 
   const sessionItems = sessionsQuery.data?.items ?? [];
   const selectedSessionSummary = useMemo<ImageSessionSummary | null>(
@@ -600,11 +640,56 @@ function ImageChatWorkbenchPage() {
     queryFn: api.listGenerationConfigOptions,
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
+  const runtimeConfigState = asyncViewStateFromQuery({
+    active: true,
+    data: runtimeConfigQuery.data,
+    dataUpdatedAt: runtimeConfigQuery.dataUpdatedAt,
+    isSuccess: runtimeConfigQuery.isSuccess,
+    isError: runtimeConfigQuery.isError,
+    fetchStatus: runtimeConfigQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const generationResourceGroupsState = asyncViewStateFromQuery({
+    active: true,
+    data: generationResourceGroupsQuery.data,
+    dataUpdatedAt: generationResourceGroupsQuery.dataUpdatedAt,
+    isSuccess: generationResourceGroupsQuery.isSuccess,
+    isError: generationResourceGroupsQuery.isError,
+    fetchStatus: generationResourceGroupsQuery.fetchStatus,
+    isEmpty: (data) => activeGenerationResourceGroupsInApiOrder(data).length === 0,
+  });
+  const generationResourceGroupsPhase = asyncViewPhase(generationResourceGroupsState);
+  const generationResourceGroupsResolved =
+    generationResourceGroupsPhase === "ready" || generationResourceGroupsPhase === "empty";
+  const generationConfigOptionsState = asyncViewStateFromQuery({
+    active: true,
+    data: generationConfigOptionsQuery.data,
+    dataUpdatedAt: generationConfigOptionsQuery.dataUpdatedAt,
+    isSuccess: generationConfigOptionsQuery.isSuccess,
+    isError: generationConfigOptionsQuery.isError,
+    fetchStatus: generationConfigOptionsQuery.fetchStatus,
+    isEmpty: (data) => data.length === 0,
+  });
+  const generationConfigOptionsPhase = asyncViewPhase(generationConfigOptionsState);
+  const generationDependenciesState = combineAsyncViewStates({
+    active: true,
+    critical: [runtimeConfigState, generationResourceGroupsState, generationConfigOptionsState],
+    isEmpty: false,
+  });
   const galleryTagsQuery = useQuery({
     queryKey: ["gallery-tags", "active"],
     queryFn: () => api.listGalleryTags(),
     enabled: Boolean(galleryTagPickerAsset),
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
+  });
+  const galleryTagsState = asyncViewStateFromQuery({
+    active: Boolean(galleryTagPickerAsset),
+    data: galleryTagsQuery.data,
+    dataUpdatedAt: galleryTagsQuery.dataUpdatedAt,
+    isSuccess: galleryTagsQuery.isSuccess,
+    isError: galleryTagsQuery.isError,
+    fetchStatus: galleryTagsQuery.fetchStatus,
+    isEmpty: (data) => data.length === 0,
   });
   const rbacUsersQuery = useQuery({
     queryKey: ["rbac-users", "image-session-owner-filter", deferredSessionOwnerSearch],
@@ -613,6 +698,26 @@ function ImageChatWorkbenchPage() {
     retry: false,
     staleTime: RBAC_USERS_STALE_TIME_MS,
   });
+  const inspirationAssociationState = isInspirationMode
+    ? asyncViewStateFromQuery({
+        active: Boolean(inspirationId),
+        data: inspirationQuery.data,
+        dataUpdatedAt: inspirationQuery.dataUpdatedAt,
+        isSuccess: inspirationQuery.isSuccess,
+        isError: inspirationQuery.isError,
+        fetchStatus: inspirationQuery.fetchStatus,
+        isEmpty: () => false,
+      })
+    : asyncViewStateFromQuery({
+        active: Boolean(selectedResourceGroupId),
+        data: inspirationsQuery.data,
+        dataUpdatedAt: inspirationsQuery.dataUpdatedAt,
+        isSuccess: inspirationsQuery.isSuccess,
+        isError: inspirationsQuery.isError,
+        fetchStatus: inspirationsQuery.fetchStatus,
+        isEmpty: (data) => data.items.length === 0,
+      });
+  const inspirationAssociationPhase = asyncViewPhase(inspirationAssociationState);
 
   const inspirations = inspirationsQuery.data?.items ?? [];
   const rbacUsers = rbacUsersQuery.data?.items ?? [];
@@ -696,7 +801,7 @@ function ImageChatWorkbenchPage() {
   }
 
   useEffect(() => {
-    if (!generationResourceGroupsQuery.isFetched) {
+    if (generationResourceGroupsPhase !== "ready" && generationResourceGroupsPhase !== "empty") {
       return;
     }
     if (!resourceGroups.length) {
@@ -718,7 +823,7 @@ function ImageChatWorkbenchPage() {
       setSelectedSessionResourceGroupId(firstActiveGenerationResourceGroupId(resourceGroups));
     }
   }, [
-    generationResourceGroupsQuery.isFetched,
+    generationResourceGroupsPhase,
     resourceGroups,
     selectedResourceGroupId,
     selectedSessionResourceGroupId,
@@ -731,7 +836,10 @@ function ImageChatWorkbenchPage() {
       }
       return;
     }
-    if (!generationConfigOptionsQuery.isFetched || !promptPolishConfigId) {
+    if (
+      (generationConfigOptionsPhase !== "ready" && generationConfigOptionsPhase !== "empty")
+      || !promptPolishConfigId
+    ) {
       return;
     }
     if (!promptPolishConfigOptions.some((config) => config.id === promptPolishConfigId)) {
@@ -739,7 +847,7 @@ function ImageChatWorkbenchPage() {
       setPromptPolishConfigId(null);
     }
   }, [
-    generationConfigOptionsQuery.isFetched,
+    generationConfigOptionsPhase,
     promptPolishConfigId,
     promptPolishConfigMode,
     promptPolishConfigOptions,
@@ -752,7 +860,10 @@ function ImageChatWorkbenchPage() {
       }
       return;
     }
-    if (!generationConfigOptionsQuery.isFetched || !generationConfigId) {
+    if (
+      (generationConfigOptionsPhase !== "ready" && generationConfigOptionsPhase !== "empty")
+      || !generationConfigId
+    ) {
       return;
     }
     if (!imageGenerationConfigOptions.some((config) => config.id === generationConfigId)) {
@@ -762,7 +873,7 @@ function ImageChatWorkbenchPage() {
   }, [
     generationConfigId,
     generationConfigMode,
-    generationConfigOptionsQuery.isFetched,
+    generationConfigOptionsPhase,
     imageGenerationConfigOptions,
   ]);
 
@@ -816,7 +927,10 @@ function ImageChatWorkbenchPage() {
   }
 
   useEffect(() => {
-    if (isInspirationMode || !inspirationsQuery.isFetched) {
+    if (
+      isInspirationMode
+      || (inspirationAssociationPhase !== "ready" && inspirationAssociationPhase !== "empty")
+    ) {
       return;
     }
     if (!inspirations.length) {
@@ -828,7 +942,7 @@ function ImageChatWorkbenchPage() {
     if (!targetInspirationId || !inspirations.some((inspiration) => inspiration.id === targetInspirationId)) {
       setTargetInspirationId(inspirations[0].id);
     }
-  }, [inspirations, inspirationsQuery.isFetched, isInspirationMode, targetInspirationId]);
+  }, [inspirationAssociationPhase, inspirations, isInspirationMode, targetInspirationId]);
 
   function defaultCreateSessionResourceGroupId(): string {
     if (selectedResourceGroupId && resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
@@ -848,7 +962,7 @@ function ImageChatWorkbenchPage() {
       setErrorMessage(createSessionBlockedTitle);
       return;
     }
-    if (generationResourceGroupsQuery.isLoading) {
+    if (generationResourceGroupsPhase !== "ready" && generationResourceGroupsPhase !== "empty") {
       return;
     }
     const defaultResourceGroupId = defaultCreateSessionResourceGroupId();
@@ -866,7 +980,7 @@ function ImageChatWorkbenchPage() {
     if (createSessionRouteIntentConsumedRef.current || searchParams.get("create_session") !== "1") {
       return;
     }
-    if (!generationResourceGroupsQuery.isFetched) {
+    if (generationResourceGroupsPhase !== "ready" && generationResourceGroupsPhase !== "empty") {
       return;
     }
     createSessionRouteIntentConsumedRef.current = true;
@@ -874,7 +988,7 @@ function ImageChatWorkbenchPage() {
     const nextSearchParams = new URLSearchParams(searchParams);
     nextSearchParams.delete("create_session");
     setSearchParams(nextSearchParams, { replace: true });
-  }, [generationResourceGroupsQuery.isFetched, searchParams, setSearchParams]);
+  }, [generationResourceGroupsPhase, searchParams, setSearchParams]);
 
   const createSessionMutation = useMutation({
     mutationFn: ({ resourceGroupId }: { resourceGroupId: string }) => {
@@ -935,7 +1049,7 @@ function ImageChatWorkbenchPage() {
   }, [createSessionDialogOpen, createSessionMutation.isPending]);
 
   useEffect(() => {
-    if (sessionsQuery.isLoading) {
+    if (sessionListPhase !== "ready" && sessionListPhase !== "empty") {
       return;
     }
     if (selectedSessionId && sessionItems.some((item) => item.id === selectedSessionId)) {
@@ -960,7 +1074,7 @@ function ImageChatWorkbenchPage() {
   }, [
     selectedSessionId,
     sessionItems,
-    sessionsQuery.isLoading,
+    sessionListPhase,
   ]);
 
   const sessionDetailQuery = useQuery({
@@ -968,6 +1082,42 @@ function ImageChatWorkbenchPage() {
     queryFn: () => api.getImageSession(selectedSessionId!),
     enabled: Boolean(selectedSessionId),
   });
+  const sessionDetailState = asyncViewStateFromQuery({
+    active: Boolean(selectedSessionId),
+    data: sessionDetailQuery.data,
+    dataUpdatedAt: sessionDetailQuery.dataUpdatedAt,
+    isSuccess: sessionDetailQuery.isSuccess,
+    isError: sessionDetailQuery.isError,
+    fetchStatus: sessionDetailQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const workbenchSettingsState = combineAsyncViewStates({
+    active: Boolean(selectedSessionId),
+    critical: [sessionDetailState, generationDependenciesState],
+    isEmpty: false,
+  });
+  const workbenchSettingsPhase = asyncViewPhase(workbenchSettingsState);
+
+  function retrySessionDetail() {
+    void sessionDetailQuery.refetch();
+  }
+
+  function retryWorkbenchSettings() {
+    void Promise.all([
+      sessionDetailQuery.refetch(),
+      runtimeConfigQuery.refetch(),
+      generationResourceGroupsQuery.refetch(),
+      generationConfigOptionsQuery.refetch(),
+    ]);
+  }
+
+  function retryInspirationAssociation() {
+    if (isInspirationMode) {
+      void inspirationQuery.refetch();
+      return;
+    }
+    void inspirationsQuery.refetch();
+  }
 
   const imageSession = sessionDetailQuery.data;
   const latestGenerationState = useMemo(
@@ -1143,6 +1293,16 @@ function ImageChatWorkbenchPage() {
       }),
     enabled: Boolean(selectedRound?.generated_asset.id),
   });
+  const selectedGeneratedResourceStatusState = asyncViewStateFromQuery({
+    active: Boolean(selectedRound?.generated_asset.id),
+    data: selectedGeneratedResourceStatusQuery.data,
+    dataUpdatedAt: selectedGeneratedResourceStatusQuery.dataUpdatedAt,
+    isSuccess: selectedGeneratedResourceStatusQuery.isSuccess,
+    isError: selectedGeneratedResourceStatusQuery.isError,
+    fetchStatus: selectedGeneratedResourceStatusQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const selectedGeneratedResourceStatusPhase = asyncViewPhase(selectedGeneratedResourceStatusState);
   const selectedGeneratedSavedToResourceLibrary = Boolean(
     selectedGeneratedResourceStatusQuery.data?.items[0]?.saved,
   );
@@ -1780,11 +1940,11 @@ function ImageChatWorkbenchPage() {
   });
 
   const createSessionNoResourceGroupTitle =
-    generationResourceGroupsQuery.isFetched && !resourceGroups.length ? t("chat.noResourceGroups") : null;
+    generationResourceGroupsResolved && !resourceGroups.length ? t("chat.noResourceGroups") : null;
   const createSessionButtonTitle = createSessionBlockedTitle ?? createSessionNoResourceGroupTitle ?? t("chat.newSession");
   const createSessionDisabled =
     createSessionMutation.isPending ||
-    generationResourceGroupsQuery.isLoading ||
+    !generationResourceGroupsResolved ||
     Boolean(createSessionBlockedTitle) ||
     !resourceGroups.length;
   const renameSessionDisabled = !selectedSessionId || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle);
@@ -1793,7 +1953,8 @@ function ImageChatWorkbenchPage() {
   const saveSelectedGalleryTitle = selectedGeneratedSavedToGallery
     ? t("chat.alreadyInGallery")
     : selectedResultBlockedTitle ?? t("chat.saveSelectedGallery");
-  const saveSelectedResourceLibraryDisabled = Boolean(resourceLibrarySaveGeneratedBlockedTitle);
+  const saveSelectedResourceLibraryDisabled =
+    selectedGeneratedResourceStatusPhase !== "ready" || Boolean(resourceLibrarySaveGeneratedBlockedTitle);
   const sessionDeletionEnabled = deletionEnabled;
 
   function handleGenerate() {
@@ -2177,7 +2338,7 @@ function ImageChatWorkbenchPage() {
   }
 
   function handleSaveSelectedToResourceLibrary() {
-    if (!selectedRound) {
+    if (!selectedRound || selectedGeneratedResourceStatusPhase !== "ready") {
       return;
     }
     if (resourceLibrarySaveGeneratedBlockedTitle) {
@@ -2190,6 +2351,10 @@ function ImageChatWorkbenchPage() {
       title: selectedRound.generated_asset.original_filename,
       thumbnail_url: selectedRound.generated_asset.thumbnail_url,
     });
+  }
+
+  function retrySelectedGeneratedResourceStatus() {
+    void selectedGeneratedResourceStatusQuery.refetch();
   }
 
   function handleResourceLibraryAssetSelect(asset: ResourceLibraryAsset) {
@@ -2462,6 +2627,7 @@ function ImageChatWorkbenchPage() {
           <GalleryHorizontalEnd size={15} /> {t("chat.resultUsage")}
         </div>
         <InspirationAssociationPanel
+          state={inspirationAssociationState}
           isInspirationMode={isInspirationMode}
           inspiration={inspirationQuery.data}
           inspirations={inspirations}
@@ -2477,6 +2643,7 @@ function ImageChatWorkbenchPage() {
           onDeleteReference={handleDeleteInspirationReference}
           onPreviewReference={(asset) => setReferencePreview({ asset, title: t("detail.referenceImage") })}
           onAttach={handleAttach}
+          onRetry={retryInspirationAssociation}
           saveBlockedTitle={inspirationAttachBlockedTitle}
           editBlockedTitle={inspirationReferenceEditBlockedTitle}
           t={t}
@@ -2726,7 +2893,7 @@ function ImageChatWorkbenchPage() {
                 ]}
                 onChange={handleSessionResourceGroupFilterChange}
                 ariaLabel={t("chat.sessionResourceGroupFilter")}
-                disabled={generationResourceGroupsQuery.isLoading}
+                disabled={!generationResourceGroupsResolved}
                 size="compact"
               />
             </label>
@@ -3205,6 +3372,57 @@ function ImageChatWorkbenchPage() {
     );
   }
 
+  function renderWorkbenchSettingsAsync(content: ReactNode) {
+    const contentWithRefreshError = (
+      <>
+        {workbenchSettingsState.error === "refresh" ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+            <span>{t("chat.loadWorkbenchFailed")}</span>
+            <button type="button" className="font-semibold underline" onClick={retryWorkbenchSettings}>
+              {t("common.retry")}
+            </button>
+          </div>
+        ) : null}
+        {content}
+      </>
+    );
+
+    return (
+      <AsyncContent
+        state={workbenchSettingsState}
+        refreshIntent="background"
+        loadingLabel={t("app.loading")}
+        skeleton={<ImageChatSettingsSkeleton />}
+        initialError={(
+          <AsyncErrorState
+            title={t("chat.loadWorkbenchFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={workbenchSettingsState.fetch === "fetching"}
+            onRetry={retryWorkbenchSettings}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={retryWorkbenchSettings}
+          />
+        )}
+        inactive={(
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
+            {t("chat.selectSession")}
+          </div>
+        )}
+        empty={contentWithRefreshError}
+        className="space-y-6"
+      >
+        {contentWithRefreshError}
+      </AsyncContent>
+    );
+  }
+
   const selectedSessionTitle = imageSession?.title ?? t("chat.workbench");
   const selectedRoundSizeText = selectedRound
     ? t("gallery.sizeActualRequested", {
@@ -3299,29 +3517,66 @@ function ImageChatWorkbenchPage() {
         >
           {selectedGeneratedSavedToGallery ? t("chat.alreadyInGallery") : t("chat.sendGallery")}
         </ActionButton>
-        <ActionButton
-          preset="secondary"
-          size="sm"
-          onClick={handleSaveSelectedToResourceLibrary}
-          disabled={saveSelectedResourceLibraryDisabled}
-          title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
-          aria-label={t("chat.resourceLibrary.saveGenerated")}
-          leadingIcon={selectedGeneratedSavedToResourceLibrary ? <Check size={13} /> : <Save size={13} />}
-          className="text-[11px]"
-        >
-          {selectedGeneratedSavedToResourceLibrary
-            ? t("resourceLibrary.alreadyInLibrary")
-            : t("chat.resourceLibrary.saveGenerated")}
-        </ActionButton>
+        {selectedGeneratedResourceStatusPhase === "loading"
+          || selectedGeneratedResourceStatusPhase === "inactive" ? (
+          <Skeleton className="h-8 w-28" />
+        ) : selectedGeneratedResourceStatusPhase === "paused"
+          || selectedGeneratedResourceStatusPhase === "initial-error"
+          || selectedGeneratedResourceStatusPhase === "initial-idle" ? (
+          <ActionButton
+            preset="secondary"
+            size="sm"
+            onClick={retrySelectedGeneratedResourceStatus}
+            title={t("resourceLibrary.sourceStatusLoadFailed")}
+            aria-label={t("common.retry")}
+            loading={selectedGeneratedResourceStatusState.fetch === "fetching"}
+            leadingIcon={<RefreshCw size={13} />}
+            className="text-[11px]"
+          >
+            {t("common.retry")}
+          </ActionButton>
+        ) : (
+          <>
+            <ActionButton
+              preset="secondary"
+              size="sm"
+              onClick={handleSaveSelectedToResourceLibrary}
+              disabled={saveSelectedResourceLibraryDisabled}
+              title={resourceLibrarySaveGeneratedBlockedTitle ?? t("chat.resourceLibrary.saveGenerated")}
+              aria-label={t("chat.resourceLibrary.saveGenerated")}
+              leadingIcon={selectedGeneratedSavedToResourceLibrary ? <Check size={13} /> : <Save size={13} />}
+              className="text-[11px]"
+            >
+              {selectedGeneratedSavedToResourceLibrary
+                ? t("resourceLibrary.alreadyInLibrary")
+                : t("chat.resourceLibrary.saveGenerated")}
+            </ActionButton>
+            {selectedGeneratedResourceStatusState.error === "refresh" ? (
+              <ActionButton
+                preset="secondary"
+                size="icon-sm"
+                onClick={retrySelectedGeneratedResourceStatus}
+                title={t("resourceLibrary.sourceStatusLoadFailed")}
+                aria-label={t("common.retry")}
+                leadingIcon={<RefreshCw size={13} />}
+              >
+              </ActionButton>
+            ) : null}
+          </>
+        )}
       </div>
     ) : null;
   const primaryBlockedResource = chatMode === "enhance" ? enhanceBlockedResource : generationBlockedResource;
   const primarySubmitRequirementMessage =
     chatMode === "enhance" ? enhanceSubmitRequirementMessage : generationSubmitRequirementMessage;
-  const primaryActionDisabled = chatMode === "enhance" ? enhanceSubmitDisabled : generateDisabled;
+  const primaryActionDisabled =
+    workbenchSettingsPhase !== "ready"
+    || (chatMode === "enhance" ? enhanceSubmitDisabled : generateDisabled);
   const primaryActionPending = chatMode === "enhance" ? enhanceBusy : generateMutation.isPending;
   const primaryActionTitle =
-    chatMode === "enhance"
+    workbenchSettingsPhase !== "ready"
+      ? t("chat.loadWorkbenchFailed")
+      : chatMode === "enhance"
       ? enhanceBlockedTitle ?? (enhanceSubmitRequirementMessage || t("chat.enhance.start"))
       : generationBlockedTitle ?? (generationSubmitRequirementMessage || t("chat.startGenerate"));
   const primaryActionLabel =
@@ -3414,7 +3669,7 @@ function ImageChatWorkbenchPage() {
 
           <ImageChatSessionList
             items={sessionItems}
-            isLoading={sessionsQuery.isLoading}
+            state={sessionListState}
             selectedSessionId={selectedSessionId}
             deletingSessionId={deleteSessionMutation.isPending ? (deleteSessionMutation.variables ?? null) : null}
             deletionEnabled={sessionDeletionEnabled}
@@ -3425,6 +3680,7 @@ function ImageChatWorkbenchPage() {
             maskSensitiveImages={maskSensitiveImages}
             onSelectSession={handleSelectSession}
             onDeleteSession={handleDeleteSession}
+            onRetry={() => void sessionsQuery.refetch()}
             t={t}
           />
         </aside>
@@ -3524,6 +3780,7 @@ function ImageChatWorkbenchPage() {
             ) : null}
 
             <ImageChatMainStage
+              state={sessionDetailState}
               sessionRounds={imageSession?.rounds ?? []}
               selectedRound={selectedRound}
               selectedPlaceholder={selectedPlaceholder}
@@ -3540,6 +3797,7 @@ function ImageChatWorkbenchPage() {
               onRetryGenerationTask={handleRetryGenerationTask}
               onCancelGenerationTask={handleCancelGenerationTask}
               onRegenerateGenerationTask={handleRegenerateGenerationTask}
+              onRetrySession={retrySessionDetail}
               t={t}
             />
             {selectedRound ? (
@@ -3562,6 +3820,7 @@ function ImageChatWorkbenchPage() {
           </div>
 
           <ImageChatHistoryPanel
+            state={sessionDetailState}
             historyBranches={historyBranches}
             selectedGeneratedAssetId={selectedGeneratedAssetId}
             selectedTaskPlaceholderId={selectedTaskPlaceholderId}
@@ -3572,6 +3831,7 @@ function ImageChatWorkbenchPage() {
             onSelectRound={handleSelectHistoryRound}
             onAddRoundToBase={handleAddHistoryRoundToBase}
             onSelectPlaceholder={handleSelectHistoryPlaceholder}
+            onRetry={retrySessionDetail}
             onStartNewRound={handleStartNewRound}
             newRoundDisabled={newRoundDisabled}
             newRoundActive={generationDraftMode === "new_round"}
@@ -3602,50 +3862,53 @@ function ImageChatWorkbenchPage() {
             <span className="h-12 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
           </button>
           <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-y-contain px-4 py-5 lg:px-5">
-            <div>
-              <div className="mb-3 flex items-center justify-between gap-3">
+            {renderWorkbenchSettingsAsync(
+              <>
                 <div>
-                  <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
-                    <Pencil size={15} /> {t("chat.sessionSettings")}
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-950 dark:text-white">
+                        <Pencil size={15} /> {t("chat.sessionSettings")}
+                      </div>
+                    </div>
+                    <ActionButton
+                      preset="secondary"
+                      size="sm"
+                      onClick={() => setRenameEnabled((current) => !current)}
+                      disabled={renameSessionDisabled}
+                      title={sessionEditBlockedTitle ?? t("chat.rename")}
+                      leadingIcon={<Pencil size={12} />}
+                      className="h-8 px-2.5 text-xs"
+                    >
+                      {t("chat.rename")}
+                    </ActionButton>
+                  </div>
+                  <div className="flex gap-2">
+                    <LayoutTextInput
+                      value={titleDraft}
+                      onChange={(event) => setTitleDraft(event.target.value)}
+                      disabled={!renameEnabled || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
+                      title={sessionEditBlockedTitle ?? t("chat.rename")}
+                      size="default"
+                    />
+                    {renameEnabled ? (
+                      <ActionButton
+                        preset="secondary"
+                        size="icon-lg"
+                        onClick={handleRename}
+                        disabled={renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
+                        title={sessionEditBlockedTitle ?? t("chat.saveSessionName")}
+                        aria-label={t("chat.saveSessionName")}
+                        loading={renameSessionMutation.isPending}
+                        leadingIcon={<Save size={14} />}
+                      >
+                      </ActionButton>
+                    ) : null}
                   </div>
                 </div>
-                <ActionButton
-                  preset="secondary"
-                  size="sm"
-                  onClick={() => setRenameEnabled((current) => !current)}
-                  disabled={renameSessionDisabled}
-                  title={sessionEditBlockedTitle ?? t("chat.rename")}
-                  leadingIcon={<Pencil size={12} />}
-                  className="h-8 px-2.5 text-xs"
-                >
-                  {t("chat.rename")}
-                </ActionButton>
-              </div>
-              <div className="flex gap-2">
-                <LayoutTextInput
-                  value={titleDraft}
-                  onChange={(event) => setTitleDraft(event.target.value)}
-                  disabled={!renameEnabled || renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
-                  title={sessionEditBlockedTitle ?? t("chat.rename")}
-                  size="default"
-                />
-                {renameEnabled ? (
-                  <ActionButton
-                    preset="secondary"
-                    size="icon-lg"
-                    onClick={handleRename}
-                    disabled={renameSessionMutation.isPending || Boolean(sessionEditBlockedTitle)}
-                    title={sessionEditBlockedTitle ?? t("chat.saveSessionName")}
-                    aria-label={t("chat.saveSessionName")}
-                    loading={renameSessionMutation.isPending}
-                    leadingIcon={<Save size={14} />}
-                  >
-                  </ActionButton>
-                ) : null}
-              </div>
-            </div>
-
-            {renderActionSections("image-chat-prompt")}
+                {renderActionSections("image-chat-prompt")}
+              </>,
+            )}
 
             <div className="space-y-4">
               {successMessage ? (
@@ -3755,17 +4018,18 @@ function ImageChatWorkbenchPage() {
             </div>
             <ImageChatSessionList
               items={sessionItems}
-              isLoading={sessionsQuery.isLoading}
+              state={sessionListState}
               selectedSessionId={selectedSessionId}
               deletingSessionId={deleteSessionMutation.isPending ? (deleteSessionMutation.variables ?? null) : null}
-            deletionEnabled={sessionDeletionEnabled}
-            deletionBlockedTitle={sessionListDeletionBlockedTitle}
-            currentUser={currentUser}
-            variant="mobile"
-            appearance={actionAppearance}
-            maskSensitiveImages={maskSensitiveImages}
-            onSelectSession={handleSelectSession}
-            onDeleteSession={handleDeleteSession}
+              deletionEnabled={sessionDeletionEnabled}
+              deletionBlockedTitle={sessionListDeletionBlockedTitle}
+              currentUser={currentUser}
+              variant="mobile"
+              appearance={actionAppearance}
+              maskSensitiveImages={maskSensitiveImages}
+              onSelectSession={handleSelectSession}
+              onDeleteSession={handleDeleteSession}
+              onRetry={() => void sessionsQuery.refetch()}
               t={t}
             />
           </Drawer.Content>
@@ -3819,6 +4083,7 @@ function ImageChatWorkbenchPage() {
               </ActionButton>
             </div>
             <ImageChatHistoryPanel
+              state={sessionDetailState}
               historyBranches={historyBranches}
               selectedGeneratedAssetId={selectedGeneratedAssetId}
               selectedTaskPlaceholderId={selectedTaskPlaceholderId}
@@ -3828,6 +4093,7 @@ function ImageChatWorkbenchPage() {
               onSelectRound={handleSelectHistoryRound}
               onAddRoundToBase={handleAddHistoryRoundToBase}
               onSelectPlaceholder={handleSelectHistoryPlaceholder}
+              onRetry={retrySessionDetail}
               onStartNewRound={handleStartNewRound}
               newRoundDisabled={newRoundDisabled}
               newRoundActive={generationDraftMode === "new_round"}
@@ -3904,7 +4170,7 @@ function ImageChatWorkbenchPage() {
               <span className="h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-600" />
             </Drawer.Handle>
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-y-contain px-4 pb-4 pt-2">
-              {renderActionSections("image-chat-prompt-mobile")}
+              {renderWorkbenchSettingsAsync(renderActionSections("image-chat-prompt-mobile"))}
 
               <div className="mt-4 space-y-3">
                 {successMessage ? (
@@ -4060,7 +4326,8 @@ function ImageChatWorkbenchPage() {
         open={Boolean(galleryTagPickerAsset)}
         appearance={actionAppearance}
         tags={galleryTags}
-        loading={galleryTagsQuery.isLoading}
+        state={galleryTagsState}
+        onRetry={() => void galleryTagsQuery.refetch()}
         initialSelectedTagIds={[]}
         maxSelection={galleryEntryTagMaxSelection}
         required={galleryTagRequiredOnSave}
@@ -4119,7 +4386,7 @@ function ImageChatWorkbenchPage() {
                     ]}
                     onChange={setCreateSessionResourceGroupId}
                     ariaLabel={t("chat.resourceGroup")}
-                    disabled={createSessionMutation.isPending || generationResourceGroupsQuery.isLoading}
+                    disabled={createSessionMutation.isPending || !generationResourceGroupsResolved}
                     size="compact"
                   />
                 </label>

@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   CopyPlus,
   Layers3,
-  Loader2,
   Pencil,
   Plus,
   Save,
@@ -26,6 +25,8 @@ import {
   actionButtonComponentForAppearance,
   type LayoutActionAppearance,
 } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { SkeletonCards, SkeletonRows } from "../components/loading/Skeleton";
 import { ModalShell } from "../components/ModalShell";
 import { TopNav } from "../components/TopNav";
 import {
@@ -35,6 +36,11 @@ import {
   WorkspaceTextInput,
 } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import {
+  asyncViewPhase,
+  asyncViewStateFromQuery,
+  combineAsyncViewStates,
+} from "../lib/asyncViewState";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
@@ -384,6 +390,43 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
     queryFn: () => api.listManageCanvasTemplateCategories({ scope }),
     placeholderData: keepPreviousData,
   });
+  const personalTemplatesState = asyncViewStateFromQuery({
+    active: mode === "personal",
+    data: personalTemplatesQuery.data,
+    dataUpdatedAt: personalTemplatesQuery.dataUpdatedAt,
+    isSuccess: personalTemplatesQuery.isSuccess,
+    isError: personalTemplatesQuery.isError,
+    fetchStatus: personalTemplatesQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const globalTemplatesState = asyncViewStateFromQuery({
+    active: mode === "global",
+    data: globalTemplatesQuery.data,
+    dataUpdatedAt: globalTemplatesQuery.dataUpdatedAt,
+    isSuccess: globalTemplatesQuery.isSuccess,
+    isError: globalTemplatesQuery.isError,
+    fetchStatus: globalTemplatesQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const userTemplatesState = asyncViewStateFromQuery({
+    active: mode === "global",
+    data: userTemplatesQuery.data,
+    dataUpdatedAt: userTemplatesQuery.dataUpdatedAt,
+    isSuccess: userTemplatesQuery.isSuccess,
+    isError: userTemplatesQuery.isError,
+    fetchStatus: userTemplatesQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const categoriesState = asyncViewStateFromQuery({
+    active: true,
+    data: categoriesQuery.data,
+    dataUpdatedAt: categoriesQuery.dataUpdatedAt,
+    isSuccess: categoriesQuery.isSuccess,
+    isError: categoriesQuery.isError,
+    fetchStatus: categoriesQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const categoriesPhase = asyncViewPhase(categoriesState);
 
   const categories = categoriesQuery.data?.items ?? [];
   const globalCategories = mode === "global" ? categories : [];
@@ -401,6 +444,11 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
         .map((template) => localizeCanvasTemplateSummary(template, locale)),
     [locale, templateItems],
   );
+  const templatesState = combineAsyncViewStates({
+    active: true,
+    critical: mode === "global" ? [globalTemplatesState, userTemplatesState] : [personalTemplatesState],
+    isEmpty: templates.length === 0,
+  });
 
   const invalidateTemplateData = async () => {
     await queryClient.invalidateQueries({ queryKey: ["canvas-templates"] });
@@ -553,22 +601,17 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   const pageDescription = mode === "global" ? t("templateManage.globalDescription") : t("templateManage.personalDescription");
   const backPath = mode === "global" ? settingsPathForSection("globalTemplates") : "/inspirations/new";
   const backLabel = mode === "global" ? t("templateManage.backToSettings") : t("templateManage.backToCreate");
-  const templatesLoading =
-    mode === "global"
-      ? globalTemplatesQuery.isLoading || userTemplatesQuery.isLoading
-      : personalTemplatesQuery.isLoading;
-  const templatesFetching =
-    mode === "global"
-      ? globalTemplatesQuery.isFetching || userTemplatesQuery.isFetching
-      : personalTemplatesQuery.isFetching;
-  const loading = templatesLoading || categoriesQuery.isLoading;
-  const loadFailed =
-    categoriesQuery.isError ||
-    (mode === "global"
-      ? globalTemplatesQuery.isError || userTemplatesQuery.isError
-      : personalTemplatesQuery.isError);
+  const categoriesResolved = categoriesPhase === "ready" || categoriesPhase === "empty";
   const isWorkspaceSubpage = activeScheme === "workspace";
   const PageActionButton = templateActionButtonComponent(isWorkspaceSubpage);
+
+  function retryTemplates() {
+    if (mode === "global") {
+      void Promise.all([globalTemplatesQuery.refetch(), userTemplatesQuery.refetch()]);
+      return;
+    }
+    void personalTemplatesQuery.refetch();
+  }
 
   return (
     <div className={`${isWorkspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} min-h-[100dvh] text-slate-900 dark:text-slate-100`}>
@@ -594,12 +637,6 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
             {backLabel}
           </PageActionButton>
         </header>
-
-        {loadFailed ? (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-            {t("templateManage.loadFailed")}
-          </div>
-        ) : null}
 
         <div className={isWorkspaceSubpage ? "pf-side-shell min-h-full" : "grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]"}>
           <aside className={isWorkspaceSubpage ? "pf-side-rail space-y-5 px-4 py-5 sm:px-5" : "space-y-5"}>
@@ -663,7 +700,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                         ]}
                         onChange={setCategoryFilter}
                         size="default"
-                        disabled={categoriesQuery.isLoading}
+                        disabled={!categoriesResolved}
                       />
                     ) : (
                       <ClassicSelectField
@@ -674,7 +711,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                         ]}
                         onChange={setCategoryFilter}
                         radius="lg"
-                        disabled={categoriesQuery.isLoading}
+                        disabled={!categoriesResolved}
                       />
                     )}
                   </label>
@@ -692,6 +729,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   }}
                   preset="primary"
                   size="md"
+                  disabled={!categoriesResolved}
                   leadingIcon={<Plus size={13} />}
                 >
                   {t("templateManage.categoryCreate")}
@@ -754,9 +792,46 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   </div>
                 </form>
               ) : null}
-              <div className="mt-4 space-y-2">
-                {categories.length ? (
-                  categories.map((category) => (
+              <AsyncContent
+                state={categoriesState}
+                refreshIntent="background"
+                loadingLabel={t("app.loading")}
+                skeleton={<SkeletonRows count={4} className="mt-4" />}
+                initialError={(
+                  <AsyncErrorState
+                    className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+                    title={t("templateFilter.categoriesLoadFailed")}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("app.loading")}
+                    retrying={categoriesState.fetch === "fetching"}
+                    onRetry={() => void categoriesQuery.refetch()}
+                  />
+                )}
+                paused={(
+                  <AsyncPausedState
+                    title={t("app.requestPaused.title")}
+                    message={t("app.requestPaused.message")}
+                    retryLabel={t("common.retry")}
+                    onRetry={() => void categoriesQuery.refetch()}
+                    className="mt-4 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-100"
+                  />
+                )}
+                inactive={null}
+                empty={(
+                  <div className="mt-4 rounded-xl border border-dashed pf-hairline-strong px-3 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    {t("templateManage.categoryEmpty")}
+                  </div>
+                )}
+                refreshFeedback={
+                  categoriesState.error === "refresh" ? (
+                    <div className="mt-3 text-xs text-red-600 dark:text-red-300">
+                      {t("templateFilter.categoriesLoadFailed")}
+                    </div>
+                  ) : null
+                }
+              >
+                <div className="mt-4 space-y-2">
+                  {categories.map((category) => (
                     <div
                       key={category.id}
                       className={`${TEMPLATE_FIELD_CARD_CLASS} flex items-center gap-2 px-3 py-2`}
@@ -787,13 +862,9 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                         leadingIcon={<Trash2 size={13} />}
                       />
                     </div>
-                  ))
-                ) : (
-                  <div className="rounded-xl border border-dashed pf-hairline-strong px-3 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                    {t("templateManage.categoryEmpty")}
-                  </div>
-                )}
-              </div>
+                  ))}
+                </div>
+              </AsyncContent>
             </section>
           </aside>
 
@@ -805,15 +876,53 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   {t("templateFilter.scope")}: {mode === "global" ? t("templateFilter.scopeGlobal") : t("templateFilter.scopeUser")}
                 </p>
               </div>
-              {templatesFetching || categoriesQuery.isFetching ? <Loader2 size={18} className="animate-spin text-slate-400" /> : null}
             </div>
 
-            {!templates.length && !loading ? (
-              <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed pf-hairline-strong bg-slate-50 px-6 text-center dark:border-slate-700 dark:bg-[#0b1220]">
-                <Layers3 size={34} className="text-slate-400" />
-                <div className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">{t("templateManage.templateEmpty")}</div>
-              </div>
-            ) : (
+            <AsyncContent
+              state={templatesState}
+              refreshIntent="parameter-change"
+              loadingLabel={t("app.loading")}
+              skeleton={<SkeletonCards count={6} className="lg:grid-cols-2 xl:grid-cols-2" />}
+              initialError={(
+                <AsyncErrorState
+                  title={t("templateManage.loadFailed")}
+                  retryLabel={t("common.retry")}
+                  retryingLabel={t("app.loading")}
+                  retrying={templatesState.fetch === "fetching"}
+                  onRetry={retryTemplates}
+                />
+              )}
+              paused={(
+                <AsyncPausedState
+                  title={t("app.requestPaused.title")}
+                  message={t("app.requestPaused.message")}
+                  retryLabel={t("common.retry")}
+                  onRetry={retryTemplates}
+                />
+              )}
+              inactive={null}
+              empty={(
+                <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed pf-hairline-strong bg-slate-50 px-6 text-center dark:border-slate-700 dark:bg-[#0b1220]">
+                  <Layers3 size={34} className="text-slate-400" />
+                  <div className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">{t("templateManage.templateEmpty")}</div>
+                </div>
+              )}
+              refreshFeedback={
+                templatesState.error === "refresh" ? (
+                  <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                    <span>{t("templateManage.loadFailed")}</span>
+                    <PageActionButton
+                      preset="secondary"
+                      size="sm"
+                      className="shrink-0 text-xs"
+                      onClick={retryTemplates}
+                    >
+                      {t("common.retry")}
+                    </PageActionButton>
+                  </div>
+                ) : null
+              }
+            >
               <div className="grid gap-4 lg:grid-cols-2">
                 {templates.map((template) => {
                   const draft = templateDrafts[template.key] ?? templateDraft(template);
@@ -940,7 +1049,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                               }
                               ariaLabel={t("templateManage.templateCategory")}
                               size="compact"
-                              disabled={!canEditTemplate}
+                              disabled={!canEditTemplate || !categoriesResolved}
                             />
                           ) : (
                             <ClassicSelectField
@@ -958,7 +1067,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                               ariaLabel={t("templateManage.templateCategory")}
                               radius="lg"
                               size="compact"
-                              disabled={!canEditTemplate}
+                              disabled={!canEditTemplate || !categoriesResolved}
                             />
                           )}
                           {isWorkspaceSubpage ? (
@@ -1099,6 +1208,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                               }
                               preset="secondary"
                               size="md"
+                              disabled={!categoriesResolved}
                               leadingIcon={<CopyPlus size={13} />}
                             >
                               {t("templateManage.copyGlobal")}
@@ -1171,7 +1281,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                   );
                 })}
               </div>
-            )}
+            </AsyncContent>
           </section>
         </div>
           </div>

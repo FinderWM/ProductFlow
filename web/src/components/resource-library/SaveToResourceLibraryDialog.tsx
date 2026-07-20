@@ -1,12 +1,19 @@
 import { useEffect, useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CheckCircle2, Image as ImageIcon, Loader2, Save, X } from "lucide-react";
+import { Check, CheckCircle2, Image as ImageIcon, Save, X } from "lucide-react";
 
 import { api, ApiError } from "../../lib/api";
+import {
+  asyncViewPhase,
+  asyncViewStateFromQuery,
+  combineAsyncViewStates,
+} from "../../lib/asyncViewState";
 import { useI18n } from "../../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup, ResourceLibrarySourceType } from "../../lib/types";
 import type { ActionButtonPreset } from "../ActionButton";
 import { actionButtonComponentForAppearance } from "../layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../loading/AsyncContent";
+import { Skeleton } from "../loading/Skeleton";
 import { ModalShell } from "../ModalShell";
 import { WorkspaceOptionToggle } from "../workspaceInputs";
 
@@ -133,6 +140,31 @@ export function SaveToResourceLibraryDialog({
       }),
     enabled: open && canWrite && Boolean(source),
   });
+  const groupsState = asyncViewStateFromQuery({
+    active: open && canWrite,
+    data: groupsQuery.data,
+    dataUpdatedAt: groupsQuery.dataUpdatedAt,
+    isSuccess: groupsQuery.isSuccess,
+    isError: groupsQuery.isError,
+    fetchStatus: groupsQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const sourceStatusState = asyncViewStateFromQuery({
+    active: open && canWrite && Boolean(source),
+    data: sourceStatusQuery.data,
+    dataUpdatedAt: sourceStatusQuery.dataUpdatedAt,
+    isSuccess: sourceStatusQuery.isSuccess,
+    isError: sourceStatusQuery.isError,
+    fetchStatus: sourceStatusQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const sourceStatusPhase = asyncViewPhase(sourceStatusState);
+  const dialogDataState = combineAsyncViewStates({
+    active: open && canWrite && Boolean(source),
+    critical: [groupsState, sourceStatusState],
+    isEmpty: (groupsQuery.data?.items.length ?? 0) === 0,
+  });
+  const dialogDataPhase = asyncViewPhase(dialogDataState);
   const groups = groupsQuery.data?.items ?? EMPTY_RESOURCE_LIBRARY_GROUPS;
   const sourceStatus = sourceStatusQuery.data?.items[0] ?? null;
   const alreadySaved = Boolean(sourceStatus?.saved);
@@ -151,6 +183,9 @@ export function SaveToResourceLibraryDialog({
   }, [source?.source_id, source?.source_type]);
 
   useEffect(() => {
+    if (dialogDataPhase !== "ready" && dialogDataPhase !== "empty") {
+      return;
+    }
     setSelectedGroupIds((current) => {
       const availableIds = new Set(groups.map((group) => group.id));
       const next = current.filter((groupId) => availableIds.has(groupId) && !existingGroupIds.has(groupId));
@@ -158,7 +193,11 @@ export function SaveToResourceLibraryDialog({
         ? current
         : next;
     });
-  }, [groups, sourceStatus?.group_ids]);
+  }, [dialogDataPhase, groups, sourceStatus?.group_ids]);
+
+  function retryDialogData() {
+    void Promise.all([groupsQuery.refetch(), sourceStatusQuery.refetch()]);
+  }
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -223,6 +262,11 @@ export function SaveToResourceLibraryDialog({
     return null;
   }
 
+  const dialogDataErrorMessage =
+    sourceStatusQuery.isError && sourceStatusState.content === "none"
+      ? t("resourceLibrary.sourceStatusLoadFailed")
+      : t("resourceLibrary.loadFailed");
+
   const dialog = (
     <>
       <ModalShell
@@ -270,7 +314,17 @@ export function SaveToResourceLibraryDialog({
                 <div className="min-w-0 text-sm font-medium text-slate-800 dark:text-slate-100">
                   <div className="truncate">{source.title ?? t("resourceLibrary.saveToLibrary")}</div>
                   <div className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">
-                    {alreadySaved ? t("resourceLibrary.alreadyInLibrary") : t("resourceLibrary.selectGroups")}
+                    {sourceStatusPhase === "loading" ? (
+                      <Skeleton className="h-3 w-32" />
+                    ) : sourceStatusPhase === "paused" ? (
+                      t("app.requestPaused.title")
+                    ) : sourceStatusPhase === "initial-error" || sourceStatusPhase === "initial-idle" ? (
+                      t("resourceLibrary.sourceStatusLoadFailed")
+                    ) : alreadySaved ? (
+                      t("resourceLibrary.alreadyInLibrary")
+                    ) : (
+                      t("resourceLibrary.selectGroups")
+                    )}
                   </div>
                 </div>
               </div>
@@ -285,15 +339,49 @@ export function SaveToResourceLibraryDialog({
               <div className="mb-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
                 {t("resourceLibrary.groups")}
               </div>
-              {groupsQuery.isLoading ? (
-                <div className="flex h-24 items-center justify-center text-slate-400">
-                  <Loader2 size={18} className="animate-spin" />
-                </div>
-              ) : groupsQuery.isError ? (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-                  {t("resourceLibrary.loadFailed")}
-                </div>
-              ) : groups.length ? (
+              <AsyncContent
+                state={dialogDataState}
+                refreshIntent="background"
+                loadingLabel={t("resourceLibrary.loading")}
+                skeleton={(
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {[1, 2, 3, 4].map((item) => <Skeleton key={item} className="h-10 w-full" rounded="lg" />)}
+                  </div>
+                )}
+                initialError={(
+                  <AsyncErrorState
+                    title={dialogDataErrorMessage}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("resourceLibrary.loading")}
+                    retrying={dialogDataState.fetch === "fetching"}
+                    onRetry={retryDialogData}
+                  />
+                )}
+                paused={(
+                  <AsyncPausedState
+                    title={t("app.requestPaused.title")}
+                    message={t("app.requestPaused.message")}
+                    retryLabel={t("common.retry")}
+                    onRetry={retryDialogData}
+                  />
+                )}
+                inactive={null}
+                empty={(
+                  <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    {t("resourceLibrary.noGroups")}
+                  </div>
+                )}
+                refreshFeedback={
+                  dialogDataState.error === "refresh" ? (
+                    <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                      <span>{dialogDataErrorMessage}</span>
+                      <button type="button" className="font-semibold underline" onClick={retryDialogData}>
+                        {t("common.retry")}
+                      </button>
+                    </div>
+                  ) : null
+                }
+              >
                 <div className="grid gap-2 sm:grid-cols-2">
                   {groups.map((group) => {
                     const alreadyLinked = existingGroupIds.has(group.id);
@@ -328,11 +416,7 @@ export function SaveToResourceLibraryDialog({
                     );
                   })}
                 </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                  {t("resourceLibrary.noGroups")}
-                </div>
-              )}
+              </AsyncContent>
             </div>
           </div>
 
@@ -353,8 +437,7 @@ export function SaveToResourceLibraryDialog({
               !canWrite ||
               !selectedGroupIds.length ||
               saveMutation.isPending ||
-              groupsQuery.isLoading ||
-              sourceStatusQuery.isLoading
+              dialogDataPhase !== "ready"
             }
             loading={saveMutation.isPending}
             leadingIcon={<Save size={15} />}

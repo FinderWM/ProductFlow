@@ -26,6 +26,8 @@ import {
   actionButtonComponentForAppearance,
   type LayoutActionAppearance,
 } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { SkeletonRows } from "../components/loading/Skeleton";
 import { ResourceLibraryModal } from "../components/resource-library/ResourceLibraryModal";
 import { TopNav } from "../components/TopNav";
 import {
@@ -34,6 +36,7 @@ import {
   WorkspaceSelectField,
 } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import { asyncViewStateFromQuery } from "../lib/asyncViewState";
 import { compositeEnhanceTiles, enhanceTileCallCount, estimateEnhanceTileCallCount } from "../lib/enhanceCompositor";
 import { formatDateTime } from "../lib/format";
 import { generationConfigOptionsForPurpose, generationConfigSelectionMaxDimension } from "../lib/generationConfigs";
@@ -148,6 +151,15 @@ export function EnhancePage() {
   });
 
   const jobs = jobsQuery.data?.items ?? [];
+  const jobsViewState = asyncViewStateFromQuery({
+    active: true,
+    data: jobsQuery.data,
+    dataUpdatedAt: jobsQuery.dataUpdatedAt,
+    isSuccess: jobsQuery.isSuccess,
+    isError: jobsQuery.isError,
+    fetchStatus: jobsQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
   const totalJobs = jobsQuery.data?.total ?? jobs.length;
   const totalPages = Math.max(1, Math.ceil(totalJobs / PAGE_SIZE));
   const selectedJob = selectedJobQuery.data ?? jobs.find((job) => job.id === selectedJobId) ?? jobs[0] ?? null;
@@ -553,15 +565,53 @@ export function EnhancePage() {
                   );
                 })}
               </div>
-              {jobsQuery.isLoading ? (
-                <div className="flex min-h-40 items-center justify-center pf-ink-muted">
-                  <Loader2 size={22} className="animate-spin" />
-                </div>
-              ) : jobsQuery.isError ? (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100">
-                  {t("enhance.error.loadFailed")}
-                </div>
-              ) : jobs.length ? (
+              <AsyncContent
+                state={jobsViewState}
+                refreshIntent="silent-poll"
+                loadingLabel={t("enhance.progress.loading")}
+                skeleton={<SkeletonRows count={5} />}
+                initialError={(
+                  <AsyncErrorState
+                    title={t("enhance.error.loadFailed")}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("app.loading")}
+                    retrying={jobsViewState.fetch === "fetching"}
+                    onRetry={() => void jobsQuery.refetch()}
+                  />
+                )}
+                paused={(
+                  <AsyncPausedState
+                    title={t("app.requestPaused.title")}
+                    message={t("app.requestPaused.message")}
+                    retryLabel={t("common.retry")}
+                    onRetry={() => void jobsQuery.refetch()}
+                  />
+                )}
+                inactive={null}
+                empty={(
+                  <div className="flex min-h-40 items-center justify-center text-sm pf-ink-muted dark:text-[color:var(--pf-muted)]">
+                    {t("enhance.emptyJobs")}
+                  </div>
+                )}
+                refreshFeedback={jobsViewState.error === "refresh" ? (
+                  <AsyncErrorState
+                    className="pf-async-error mt-3 rounded-xl border px-4 py-3 text-sm"
+                    title={t("enhance.error.loadFailed")}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("app.loading")}
+                    retrying={jobsViewState.fetch === "fetching"}
+                    onRetry={() => void jobsQuery.refetch()}
+                  />
+                ) : jobsViewState.fetch === "paused" ? (
+                  <AsyncPausedState
+                    className="pf-async-paused mt-3 rounded-xl border px-4 py-3 text-sm"
+                    title={t("app.requestPaused.title")}
+                    message={t("app.requestPaused.message")}
+                    retryLabel={t("common.retry")}
+                    onRetry={() => void jobsQuery.refetch()}
+                  />
+                ) : null}
+              >
                 <div className="space-y-2">
                   {jobs.map((job) => (
                     <LayoutActionSurfaceButton
@@ -590,11 +640,7 @@ export function EnhancePage() {
                     </LayoutActionSurfaceButton>
                   ))}
                 </div>
-              ) : (
-                <div className="flex min-h-40 items-center justify-center text-sm pf-ink-muted dark:text-[color:var(--pf-muted)]">
-                  {t("enhance.emptyJobs")}
-                </div>
-              )}
+              </AsyncContent>
               <div className="mt-3 flex items-center justify-between gap-2 border-t pf-hairline pt-3 text-xs pf-ink-muted dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)]">
                 <span>{t("enhance.paginationSummary", { page: pageIndex + 1, totalPages, total: totalJobs })}</span>
                 <div className="flex gap-1.5">

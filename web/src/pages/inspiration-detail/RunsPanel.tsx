@@ -5,9 +5,12 @@ import {
   actionButtonComponentForAppearance,
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../components/loading/AsyncContent";
+import { Skeleton } from "../../components/loading/Skeleton";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
 import { formatDateTime } from "../../lib/format";
 import { useI18n } from "../../lib/preferences";
+import type { AsyncViewState } from "../../lib/asyncViewState";
 import type { InspirationWorkflow, WorkflowNode, WorkflowRun, WorkflowRunStatus } from "../../lib/types";
 import { workflowNodeDisplayLabel, workflowNodeDisplayTitle } from "./nodeDisplay";
 import {
@@ -39,6 +42,8 @@ const RUN_STATUS_DOT_CLASS_NAMES: Record<WorkflowRunStatus, string> = {
 
 interface RunsPanelProps {
   workflow: InspirationWorkflow | null;
+  workflowState: AsyncViewState;
+  onRetryWorkflow: () => void;
   latestRun: InspirationWorkflow["runs"][number] | null;
   busyRunId: string | null;
   failedNodeCount: number;
@@ -80,6 +85,8 @@ function findWorkflowNode(workflow: InspirationWorkflow, nodeId: string): Workfl
 
 export function RunsPanel({
   workflow,
+  workflowState,
+  onRetryWorkflow,
   latestRun,
   busyRunId,
   failedNodeCount,
@@ -98,37 +105,56 @@ export function RunsPanel({
   const retryFailedNodesDisabled =
     Boolean(mutationBlockedTitle) || retryFailedNodesBusy || failedNodeCount === 0 || retryableFailedNodeCount !== failedNodeCount;
 
-  if (!workflow) {
-    return (
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="h-4 w-24 animate-shimmer" />
-          <div className="h-5 w-28 rounded-full animate-shimmer" />
-        </div>
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="config-bubble space-y-3 rounded-xl p-3"
-            >
-              <div className="flex items-center gap-2">
-                <div className="h-2.5 w-2.5 rounded-full animate-shimmer" />
-                <div className="h-4 w-28 animate-shimmer" />
-                <div className="ml-auto h-4 w-12 rounded animate-shimmer" />
-              </div>
-              <div className="space-y-1.5 pl-4.5">
-                <div className="h-3 w-3/4 animate-shimmer" />
-                <div className="h-3 w-1/2 animate-shimmer" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
   return (
-    <section>
+    <AsyncContent
+      state={workflowState}
+      refreshIntent="silent-poll"
+      loadingLabel={t("app.loading")}
+      skeleton={(
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-5 w-28" rounded="full" />
+          </div>
+          <div className="space-y-2">
+            {[1, 2, 3].map((index) => (
+              <div key={index} className="config-bubble space-y-3 rounded-xl p-3">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-2.5 w-2.5" rounded="full" />
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="ml-auto h-4 w-12" rounded="sm" />
+                </div>
+                <div className="space-y-1.5 pl-4.5">
+                  <Skeleton className="h-3 w-3/4" rounded="sm" />
+                  <Skeleton className="h-3 w-1/2" rounded="sm" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      initialError={(
+        <AsyncErrorState
+          title={t("detail.workflowLoadFailed")}
+          retryLabel={t("common.retry")}
+          retryingLabel={t("app.loading")}
+          retrying={workflowState.fetch === "fetching"}
+          onRetry={onRetryWorkflow}
+        />
+      )}
+      paused={(
+        <AsyncPausedState
+          title={t("app.requestPaused.title")}
+          message={t("app.requestPaused.message")}
+          retryLabel={t("common.retry")}
+          onRetry={onRetryWorkflow}
+        />
+      )}
+      inactive={null}
+      empty={null}
+    >
+      {workflow ? (
+        <section>
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="text-xs text-zinc-500 dark:text-slate-400">
           {workflow?.runs.length ? t("detail.runsCount", { count: workflow.runs.length }) : t("detail.noRunHistory")}
@@ -314,6 +340,8 @@ export function RunsPanel({
       {promptPreview ? (
         <PromptPreviewDialog appearance={actionAppearance} preview={promptPreview} onClose={() => setPromptPreview(null)} />
       ) : null}
-    </section>
+        </section>
+      ) : null}
+    </AsyncContent>
   );
 }

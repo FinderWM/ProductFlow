@@ -27,6 +27,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ClassicCheckbox, ClassicSelectField, ClassicTextInput } from "../components/classicInputs";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { Skeleton } from "../components/loading/Skeleton";
 import {
   actionButtonComponentForAppearance,
   transparentActionToneVars,
@@ -49,6 +51,7 @@ import { StatusPill } from "../components/StatusPill";
 import { TopNav } from "../components/TopNav";
 import { WorkspaceCheckbox, WorkspaceSelectField, WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import { asyncViewStateFromQuery, combineAsyncViewStates } from "../lib/asyncViewState";
 import { formatDateTimeSeconds, formatPrice } from "../lib/format";
 import { useI18n } from "../lib/preferences";
 import { API_INSPIRATIONS_WRITE, hasSessionApiPermission } from "../lib/rbac";
@@ -299,6 +302,8 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
   const [pendingDeleteInspiration, setPendingDeleteInspiration] = useState<InspirationSummary | null>(null);
   const [maskSensitiveImages, setMaskSensitiveImages] = useSensitiveImageMaskPreference("inspirations");
   const deferredOwnerSearch = useDeferredValue(ownerSearch.trim());
+  const inspirationListQueryActive =
+    selectedResourceGroupId !== null && (!isAdmin || adminOwnerFilterInitialized);
   const inspirationsQuery = useQuery({
     queryKey: ["inspirations", selectedResourceGroupId, page, PAGE_SIZE, activeSearch],
     queryFn: () =>
@@ -312,7 +317,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
         owner_user_id: isAdmin ? activeSearch.owner_user_id || undefined : undefined,
         only_deleted: isAdmin && activeSearch.only_deleted,
       }),
-    enabled: selectedResourceGroupId !== null && (!isAdmin || adminOwnerFilterInitialized),
+    enabled: inspirationListQueryActive,
     placeholderData: keepPreviousData,
     staleTime: INSPIRATION_LIST_STALE_TIME_MS,
   });
@@ -334,6 +339,29 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
     staleTime: RUNTIME_CONFIG_STALE_TIME_MS,
   });
   const inspirations = inspirationsQuery.data?.items ?? [];
+  const generationResourceGroupsViewState = asyncViewStateFromQuery({
+    active: true,
+    data: generationResourceGroupsQuery.data,
+    dataUpdatedAt: generationResourceGroupsQuery.dataUpdatedAt,
+    isSuccess: generationResourceGroupsQuery.isSuccess,
+    isError: generationResourceGroupsQuery.isError,
+    fetchStatus: generationResourceGroupsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const inspirationsViewState = asyncViewStateFromQuery({
+    active: inspirationListQueryActive,
+    data: inspirationsQuery.data,
+    dataUpdatedAt: inspirationsQuery.dataUpdatedAt,
+    isSuccess: inspirationsQuery.isSuccess,
+    isError: inspirationsQuery.isError,
+    fetchStatus: inspirationsQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const inspirationListViewState = combineAsyncViewStates({
+    active: true,
+    critical: [generationResourceGroupsViewState, inspirationsViewState],
+    isEmpty: inspirations.length === 0,
+  });
   const resourceGroups = useMemo<GenerationResourceGroup[]>(
     () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
@@ -497,6 +525,92 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
     </PageActionButton>
   );
 
+  const inspirationListSkeleton = (
+    <div className="space-y-4">
+      <div className="grid gap-3 md:grid-cols-2 lg:hidden">
+        {[1, 2, 3].map((index) => (
+          <div
+            key={index}
+            className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700/85 dark:bg-[#0f1726]"
+          >
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-10 w-10 shrink-0" rounded="lg" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-2/3" />
+                <Skeleton className="h-3.5 w-1/2" />
+              </div>
+            </div>
+            <div className="flex justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
+              <Skeleton className="h-5 w-20" rounded="full" />
+              <Skeleton className="h-4 w-24" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="pf-table-panel hidden lg:block">
+        <table className="w-full table-fixed border-collapse text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50/70 dark:border-slate-700/80 dark:bg-[#151f33]">
+              <th className="w-[32%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.inspiration")}</th>
+              <th className="w-[25%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.keyInfo")}</th>
+              <th className="w-[15%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.state")}</th>
+              <th className="w-[15%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.updated")}</th>
+              <th className="w-[13%] px-5 py-3 text-right font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.actions")}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-100 dark:divide-slate-800">
+            {[1, 2, 3, 4].map((index) => (
+              <tr key={index}>
+                <td className="px-5 py-4">
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="h-10 w-10 shrink-0" rounded="lg" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-1/3" />
+                      <Skeleton className="h-3.5 w-1/2" />
+                    </div>
+                  </div>
+                </td>
+                <td className="px-5 py-4"><Skeleton className="h-6 w-20" rounded="full" /></td>
+                <td className="px-5 py-4"><Skeleton className="h-6 w-20" rounded="full" /></td>
+                <td className="px-5 py-4"><Skeleton className="h-4 w-24" /></td>
+                <td className="px-5 py-4 text-right"><Skeleton className="ml-auto h-5 w-24" /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const inspirationListEmpty = searchActive ? (
+    <div className="rounded-xl border border-dashed border-zinc-300 bg-white px-6 py-14 text-center dark:border-slate-700/80 dark:bg-[#0f1726]">
+      <Search className="mx-auto mb-3 text-zinc-300 dark:text-slate-500" size={32} />
+      <div className="font-medium text-zinc-900 dark:text-white">{t("inspirations.search.emptyTitle")}</div>
+      <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("inspirations.search.emptyDescription")}</p>
+      <PageActionButton onClick={clearSearch} preset="secondary" size="lg" leadingIcon={<X size={16} />} className="mt-5">
+        {t("inspirations.search.clear")}
+      </PageActionButton>
+    </div>
+  ) : (
+    <div className="rounded-xl border border-dashed border-zinc-300 bg-white px-6 py-16 text-center dark:border-slate-700/80 dark:bg-[#0f1726]">
+      <ImageIcon className="mx-auto mb-3 text-zinc-300 dark:text-slate-500" size={32} />
+      <div className="font-medium text-zinc-900 dark:text-white">{t("inspirations.emptyTitle")}</div>
+      <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("inspirations.emptyDescription")}</p>
+      <PageActionButton
+        onClick={openCreateInspiration}
+        disabled={!canWriteInspirations}
+        title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
+        preset="primary"
+        size="lg"
+        leadingIcon={<Plus size={16} />}
+        className="mt-5"
+      >
+        {t("inspirations.new")}
+      </PageActionButton>
+    </div>
+  );
+
   const listContent = (
     <div className="w-full space-y-4 lg:space-y-6">
       {isWorkspaceSubpage ? (
@@ -586,75 +700,47 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
         onSubmit={submitSearch}
       />
 
-      {generationResourceGroupsQuery.isLoading || inspirationsQuery.isLoading ? (
-            <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2 lg:hidden">
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700/85 dark:bg-[#0f1726]"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 shrink-0 rounded-lg animate-shimmer" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 w-2/3 animate-shimmer" />
-                        <div className="h-3.5 w-1/2 animate-shimmer" />
-                      </div>
-                    </div>
-                    <div className="flex justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
-                      <div className="h-5 w-20 rounded-full animate-shimmer" />
-                      <div className="h-4 w-24 animate-shimmer" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="pf-table-panel hidden lg:block">
-                <table className="w-full table-fixed border-collapse text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50/70 dark:border-slate-700/80 dark:bg-[#151f33]">
-                      <th className="w-[32%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.inspiration")}</th>
-                      <th className="w-[25%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.keyInfo")}</th>
-                      <th className="w-[15%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.state")}</th>
-                      <th className="w-[15%] px-5 py-3 font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.updated")}</th>
-                      <th className="w-[13%] px-5 py-3 text-right font-medium text-zinc-500 dark:text-slate-300">{t("inspirations.table.actions")}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-100 dark:divide-slate-800">
-                    {[1, 2, 3, 4].map((i) => (
-                      <tr key={i}>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 shrink-0 rounded-lg animate-shimmer" />
-                            <div className="flex-1 space-y-2">
-                              <div className="h-4 w-1/3 animate-shimmer" />
-                              <div className="h-3.5 w-1/2 animate-shimmer" />
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="h-6 w-20 rounded-full animate-shimmer" />
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="h-6 w-20 rounded-full animate-shimmer" />
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="h-4 w-24 animate-shimmer" />
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="ml-auto h-5 w-24 animate-shimmer" />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : generationResourceGroupsQuery.isError || inspirationsQuery.isError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-              {t("inspirations.loadFailed")}
-            </div>
-          ) : inspirations.length ? (
+      <AsyncContent
+        state={inspirationListViewState}
+        refreshIntent="parameter-change"
+        loadingLabel={t("app.loading")}
+        skeleton={inspirationListSkeleton}
+        inactive={inspirationListSkeleton}
+        initialError={(
+          <AsyncErrorState
+            title={t("inspirations.loadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={inspirationListViewState.fetch === "fetching"}
+            onRetry={() => {
+              void Promise.all([generationResourceGroupsQuery.refetch(), inspirationsQuery.refetch()]);
+            }}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={() => {
+              void Promise.all([generationResourceGroupsQuery.refetch(), inspirationsQuery.refetch()]);
+            }}
+          />
+        )}
+        empty={inspirationListEmpty}
+        refreshFeedback={inspirationListViewState.error === "refresh" ? (
+          <AsyncErrorState
+            className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+            title={t("inspirations.loadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={inspirationListViewState.fetch === "fetching"}
+            onRetry={() => {
+              void Promise.all([generationResourceGroupsQuery.refetch(), inspirationsQuery.refetch()]);
+            }}
+          />
+        ) : null}
+      >
             <>
               <div className="grid gap-3 md:grid-cols-2 lg:hidden">
                 {inspirations.map((inspiration) => {
@@ -716,39 +802,7 @@ function InspirationFullListPage({ workspaceSubpage }: { workspaceSubpage: boole
                 </table>
               </div>
             </>
-          ) : searchActive ? (
-            <div className="rounded-xl border border-dashed border-zinc-300 bg-white px-6 py-14 text-center dark:border-slate-700/80 dark:bg-[#0f1726]">
-              <Search className="mx-auto mb-3 text-zinc-300 dark:text-slate-500" size={32} />
-              <div className="font-medium text-zinc-900 dark:text-white">{t("inspirations.search.emptyTitle")}</div>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("inspirations.search.emptyDescription")}</p>
-              <PageActionButton
-                onClick={clearSearch}
-                preset="secondary"
-                size="lg"
-                leadingIcon={<X size={16} />}
-                className="mt-5"
-              >
-                {t("inspirations.search.clear")}
-              </PageActionButton>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-zinc-300 bg-white px-6 py-16 text-center dark:border-slate-700/80 dark:bg-[#0f1726]">
-              <ImageIcon className="mx-auto mb-3 text-zinc-300 dark:text-slate-500" size={32} />
-              <div className="font-medium text-zinc-900 dark:text-white">{t("inspirations.emptyTitle")}</div>
-              <p className="mt-1 text-sm text-zinc-500 dark:text-slate-400">{t("inspirations.emptyDescription")}</p>
-              <PageActionButton
-                onClick={openCreateInspiration}
-                disabled={!canWriteInspirations}
-                title={canWriteInspirations ? t("inspirations.new") : t("inspirations.writePermissionRequired")}
-                preset="primary"
-                size="lg"
-                leadingIcon={<Plus size={16} />}
-                className="mt-5"
-              >
-                {t("inspirations.new")}
-              </PageActionButton>
-            </div>
-          )}
+      </AsyncContent>
 
           {inspirations.length ? (
             <div className="hidden justify-end md:flex">

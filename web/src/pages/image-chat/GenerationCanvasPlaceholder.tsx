@@ -74,7 +74,7 @@ export function GenerationCanvasPlaceholder({
                 <div className="absolute left-[35%] bottom-0 w-5.5 h-5.5 rounded-full bg-indigo-300/50 blur-[3px] animate-large-p5" />
                 <div className="absolute left-[45%] bottom-0 w-4.5 h-4.5 rounded-full bg-purple-300/60 blur-[2px] animate-large-p6" />
               </div>
-              <div className="absolute inset-6 rounded-[32px] bg-indigo-200/30 blur-2xl animate-pulse" />
+              <div className="absolute inset-6 rounded-[32px] bg-indigo-200/30 blur-2xl animate-pulse motion-reduce:animate-none" />
               <Loader2 size={48} className="relative z-10 animate-spin text-indigo-600 dark:text-violet-300" />
             </>
           ) : (

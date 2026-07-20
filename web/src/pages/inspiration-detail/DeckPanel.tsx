@@ -10,6 +10,8 @@ import {
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
 import { LayoutActionSurfaceButton } from "../../components/LayoutActionSurfaceButton";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../components/loading/AsyncContent";
+import { Skeleton, SkeletonRows } from "../../components/loading/Skeleton";
 import { ResourceLibraryModal } from "../../components/resource-library/ResourceLibraryModal";
 import {
   ClassicSelectField,
@@ -22,6 +24,7 @@ import {
   WorkspaceTextarea,
 } from "../../components/workspaceInputs";
 import { api } from "../../lib/api";
+import { asyncViewStateFromQuery, combineAsyncViewStates } from "../../lib/asyncViewState";
 import { exportDeckAsPptx } from "../../lib/deckPptxExport";
 import { useI18n } from "../../lib/preferences";
 import type { Deck, DeckSlide } from "../../lib/types";
@@ -104,6 +107,48 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode, workspaceSubpage 
     queryFn: () => api.getDeck(selectedDeckId as string),
     enabled: Boolean(selectedDeckId),
     refetchInterval: (query) => (deckIsActive(query.state.data as Deck | undefined) ? 1500 : false),
+  });
+
+  const groupsViewState = asyncViewStateFromQuery({
+    active: true,
+    data: groupsQuery.data,
+    dataUpdatedAt: groupsQuery.dataUpdatedAt,
+    isSuccess: groupsQuery.isSuccess,
+    isError: groupsQuery.isError,
+    fetchStatus: groupsQuery.fetchStatus,
+    isEmpty: (data) => data.length === 0,
+  });
+  const stylesViewState = asyncViewStateFromQuery({
+    active: true,
+    data: stylesQuery.data,
+    dataUpdatedAt: stylesQuery.dataUpdatedAt,
+    isSuccess: stylesQuery.isSuccess,
+    isError: stylesQuery.isError,
+    fetchStatus: stylesQuery.fetchStatus,
+    isEmpty: (data) => data.length === 0,
+  });
+  const creationViewState = combineAsyncViewStates({
+    active: true,
+    critical: [groupsViewState, stylesViewState],
+    isEmpty: (groupsQuery.data?.length ?? 0) === 0 || (stylesQuery.data?.length ?? 0) === 0,
+  });
+  const decksViewState = asyncViewStateFromQuery({
+    active: true,
+    data: decksQuery.data,
+    dataUpdatedAt: decksQuery.dataUpdatedAt,
+    isSuccess: decksQuery.isSuccess,
+    isError: decksQuery.isError,
+    fetchStatus: decksQuery.fetchStatus,
+    isEmpty: (data) => data.length === 0,
+  });
+  const selectedDeckViewState = asyncViewStateFromQuery({
+    active: Boolean(selectedDeckId),
+    data: deckQuery.data,
+    dataUpdatedAt: deckQuery.dataUpdatedAt,
+    isSuccess: deckQuery.isSuccess,
+    isError: deckQuery.isError,
+    fetchStatus: deckQuery.fetchStatus,
+    isEmpty: () => false,
   });
 
   const deck = deckQuery.data;
@@ -266,33 +311,128 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode, workspaceSubpage 
           className="mb-2"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <LayoutSelectField
-            value={styleKey}
-            onChange={setStyleKey}
-            size="compact"
-            ariaLabel={t("detail.deck.styleReference")}
-            options={styles.map((style) => ({
-              value: style.key,
-              label: style.label,
-            }))}
-          />
-          <ActionButton
-            disabled={createMutation.isPending || !defaultGroupId}
-            onClick={() => createMutation.mutate()}
-            preset="primary"
-            size="md"
-            loading={createMutation.isPending}
-            leadingIcon={<Plus size={15} />}
+          <AsyncContent
+            state={creationViewState}
+            refreshIntent="background"
+            loadingLabel={t("app.loading")}
+            skeleton={(
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-9 w-44" rounded="lg" />
+                <Skeleton className="h-9 w-24" rounded="lg" />
+              </div>
+            )}
+            initialError={(
+              <AsyncErrorState
+                title={t("detail.deck.configLoadFailed")}
+                retryLabel={t("common.retry")}
+                retryingLabel={t("app.loading")}
+                retrying={creationViewState.fetch === "fetching"}
+                onRetry={() => {
+                  void Promise.all([groupsQuery.refetch(), stylesQuery.refetch()]);
+                }}
+              />
+            )}
+            paused={(
+              <AsyncPausedState
+                title={t("app.requestPaused.title")}
+                message={t("app.requestPaused.message")}
+                retryLabel={t("common.retry")}
+                onRetry={() => {
+                  void Promise.all([groupsQuery.refetch(), stylesQuery.refetch()]);
+                }}
+              />
+            )}
+            inactive={null}
+            empty={(
+              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                {t("detail.deck.configUnavailable")}
+              </div>
+            )}
+            refreshFeedback={creationViewState.error === "refresh" ? (
+              <AsyncErrorState
+                className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                title={t("detail.deck.configLoadFailed")}
+                retryLabel={t("common.retry")}
+                retryingLabel={t("app.loading")}
+                retrying={creationViewState.fetch === "fetching"}
+                onRetry={() => {
+                  void Promise.all([groupsQuery.refetch(), stylesQuery.refetch()]);
+                }}
+              />
+            ) : null}
           >
-            {t("detail.deck.outline")}
-          </ActionButton>
+            <div className="flex flex-wrap items-center gap-2">
+              <LayoutSelectField
+                value={styleKey}
+                onChange={setStyleKey}
+                size="compact"
+                ariaLabel={t("detail.deck.styleReference")}
+                options={styles.map((style) => ({
+                  value: style.key,
+                  label: style.label,
+                }))}
+              />
+              <ActionButton
+                disabled={createMutation.isPending || !defaultGroupId}
+                onClick={() => createMutation.mutate()}
+                preset="primary"
+                size="md"
+                loading={createMutation.isPending}
+                leadingIcon={<Plus size={15} />}
+              >
+                {t("detail.deck.outline")}
+              </ActionButton>
+            </div>
+          </AsyncContent>
         </div>
       </section>
 
       {/* deck 历史 */}
-      {sortedDecks.length > 0 ? (
-        <section className="rounded-xl border border-slate-200/60 p-3 dark:border-white/10">
-          <h3 className="mb-2 font-medium text-slate-700 dark:text-slate-200">{t("detail.deck.historyTitle")}</h3>
+      <section className="rounded-xl border border-slate-200/60 p-3 dark:border-white/10">
+        <h3 className="mb-2 font-medium text-slate-700 dark:text-slate-200">{t("detail.deck.historyTitle")}</h3>
+        <AsyncContent
+          state={decksViewState}
+          refreshIntent="background"
+          loadingLabel={t("app.loading")}
+          skeleton={(
+            <div className="space-y-2">
+              {[1, 2, 3].map((index) => <Skeleton key={index} className="h-12 w-full" rounded="lg" />)}
+            </div>
+          )}
+          initialError={(
+            <AsyncErrorState
+              title={t("detail.deck.historyLoadFailed")}
+              retryLabel={t("common.retry")}
+              retryingLabel={t("app.loading")}
+              retrying={decksViewState.fetch === "fetching"}
+              onRetry={() => void decksQuery.refetch()}
+            />
+          )}
+          paused={(
+            <AsyncPausedState
+              title={t("app.requestPaused.title")}
+              message={t("app.requestPaused.message")}
+              retryLabel={t("common.retry")}
+              onRetry={() => void decksQuery.refetch()}
+            />
+          )}
+          inactive={null}
+          empty={(
+            <div className="rounded-lg border border-dashed border-slate-200 px-3 py-5 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              {t("detail.deck.historyEmpty")}
+            </div>
+          )}
+          refreshFeedback={decksViewState.error === "refresh" ? (
+            <AsyncErrorState
+              className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+              title={t("detail.deck.historyLoadFailed")}
+              retryLabel={t("common.retry")}
+              retryingLabel={t("app.loading")}
+              retrying={decksViewState.fetch === "fetching"}
+              onRetry={() => void decksQuery.refetch()}
+            />
+          ) : null}
+        >
           <ul className="flex flex-col gap-1">
             {sortedDecks.map((item) => {
               const itemHasDeletedWorkflowNode = hasDeletedWorkflowDeckNode(item);
@@ -343,11 +483,59 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode, workspaceSubpage 
               );
             })}
           </ul>
-        </section>
-      ) : null}
+        </AsyncContent>
+      </section>
 
       {/* 选中的 deck 详情 */}
-      {deck ? (
+      <AsyncContent
+        state={selectedDeckViewState}
+        refreshIntent="silent-poll"
+        loadingLabel={t("app.loading")}
+        skeleton={(
+          <section className="rounded-xl border border-slate-200/60 p-3 dark:border-white/10">
+            <Skeleton className="h-5 w-2/5" />
+            <SkeletonRows count={3} className="mt-3" />
+          </section>
+        )}
+        initialError={(
+          <AsyncErrorState
+            title={t("detail.deck.detailLoadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={selectedDeckViewState.fetch === "fetching"}
+            onRetry={() => void deckQuery.refetch()}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={() => void deckQuery.refetch()}
+          />
+        )}
+        inactive={null}
+        empty={null}
+        refreshFeedback={selectedDeckViewState.error === "refresh" ? (
+          <AsyncErrorState
+            className="pf-async-error mt-3 rounded-xl border px-4 py-3 text-sm"
+            title={t("detail.deck.detailLoadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={selectedDeckViewState.fetch === "fetching"}
+            onRetry={() => void deckQuery.refetch()}
+          />
+        ) : selectedDeckViewState.fetch === "paused" ? (
+          <AsyncPausedState
+            className="pf-async-paused mt-3 rounded-xl border px-4 py-3 text-sm"
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={() => void deckQuery.refetch()}
+          />
+        ) : null}
+      >
+        {deck ? (
         <section className="rounded-xl border border-slate-200/60 p-3 dark:border-white/10">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0 flex-1">
@@ -496,7 +684,8 @@ export function DeckPanel({ inspirationId, onOpenWorkflowNode, workspaceSubpage 
             ) : null}
           </div>
         </section>
-      ) : null}
+        ) : null}
+      </AsyncContent>
 
       <ResourceLibraryModal
         open={Boolean(materialSlideId) && deckAllowsLegacyMutation(deck)}

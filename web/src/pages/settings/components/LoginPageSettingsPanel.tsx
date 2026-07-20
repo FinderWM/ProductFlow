@@ -5,9 +5,12 @@ import { useEffect, useState } from "react";
 import { Image, Loader2, RotateCcw, Save } from "lucide-react";
 
 import { ClassicSelectField, ClassicTextInput, ClassicTextarea } from "../../../components/classicInputs";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../../components/loading/AsyncContent";
+import { Skeleton } from "../../../components/loading/Skeleton";
 import { ResourceLibraryModal } from "../../../components/resource-library/ResourceLibraryModal";
 import { WorkspaceSelectField, WorkspaceTextInput, WorkspaceTextarea } from "../../../components/workspaceInputs";
 import { api } from "../../../lib/api";
+import type { AsyncViewState } from "../../../lib/asyncViewState";
 import { useI18n } from "../../../lib/preferences";
 import type { ConfigItem, LoginPageMode, LoginPageTemplateId, ResourceLibraryAsset } from "../../../lib/types";
 import { draftFromItem } from "../configDrafts";
@@ -37,15 +40,21 @@ interface LoginPageSettingsPanelProps {
   resettingKey: string | null;
   disabled: boolean;
   assets: ResourceLibraryAsset[];
-  assetsLoading: boolean;
-  assetsError: boolean;
+  assetsState: AsyncViewState;
   selectionSaving: boolean;
   templateConfigSaving: boolean;
   workspaceSubpage?: boolean;
   onChange: (item: ConfigItem, value: DraftValue, touchedSecret?: boolean) => void;
   onReset: (item: ConfigItem) => void;
+  onRetryAssets: () => void;
   onSaveSelection: (value: LoginPageMode) => void;
   onSaveTemplateConfig: (templateId: LoginPageTemplateId, config: Record<string, string>) => void;
+}
+
+export function loginPageSelectableAssets(assets: readonly ResourceLibraryAsset[]): ResourceLibraryAsset[] {
+  return assets.filter(
+    (asset) => asset.kind === "image" && !asset.archived_at && asset.effective_enabled !== false,
+  );
 }
 
 export function LoginPageSettingsPanel({
@@ -55,13 +64,13 @@ export function LoginPageSettingsPanel({
   resettingKey,
   disabled,
   assets,
-  assetsLoading,
-  assetsError,
+  assetsState,
   selectionSaving,
   templateConfigSaving,
   workspaceSubpage = false,
   onChange,
   onReset,
+  onRetryAssets,
   onSaveSelection,
   onSaveTemplateConfig,
 }: LoginPageSettingsPanelProps) {
@@ -72,9 +81,7 @@ export function LoginPageSettingsPanel({
   const selectionValue = selectionItem ? String(drafts[selectionItem.key] ?? draftFromItem(selectionItem)) : "random";
   const selectionMode = isLoginPageMode(selectionValue) ? selectionValue : "random";
   const [editingTemplateId, setEditingTemplateId] = useState<LoginPageTemplateId>("command-orbit");
-  const selectableAssets = assets.filter(
-    (asset) => asset.kind === "image" && !asset.archived_at && asset.effective_enabled !== false,
-  );
+  const selectableAssets = loginPageSelectableAssets(assets);
   const activeConfigItem = loginPageTemplateConfigItem(items, editingTemplateId);
   const activeConfig = activeConfigItem
     ? parseLoginPageTemplateConfigDraft(
@@ -255,22 +262,11 @@ export function LoginPageSettingsPanel({
                             {t("settings.loginPage.useDefaultLargeImage")}
                           </button>
                         </div>
-                        {assetsLoading ? (
-                          <div className="flex items-center text-xs text-slate-500 dark:text-slate-400">
-                            <Loader2 size={13} className="mr-2 animate-spin" />
-                            {t("settings.loginPage.loadingAssets")}
-                          </div>
-                        ) : assetsError ? (
-                          <p className="text-xs text-red-600 dark:text-red-300">{t("settings.loginPage.assetsLoadFailed")}</p>
-                        ) : selectableAssets.length ? (
-                          <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {t("settings.loginPage.assetCount", { count: selectableAssets.length })}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {t("settings.loginPage.noAssets")}
-                          </p>
-                        )}
+                        <LoginPageAssetStatus
+                          state={assetsState}
+                          assetCount={selectableAssets.length}
+                          onRetry={onRetryAssets}
+                        />
                       </div>
 
                       <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950">
@@ -390,5 +386,54 @@ export function LoginPageSettingsPanel({
       assetSelectDisabledTitle={t("settings.loginPage.imageOnly")}
     />
     </>
+  );
+}
+
+export function LoginPageAssetStatus({
+  state,
+  assetCount,
+  onRetry,
+}: {
+  state: AsyncViewState;
+  assetCount: number;
+  onRetry: () => void;
+}) {
+  const { t } = useI18n();
+  const errorState = (
+    <AsyncErrorState
+      className="rounded-lg border px-3 py-2 text-xs"
+      title={t("settings.loginPage.assetsLoadFailed")}
+      retryLabel={t("common.retry")}
+      retryingLabel={t("app.loading")}
+      retrying={state.fetch === "fetching"}
+      onRetry={onRetry}
+    />
+  );
+  const pausedState = (
+    <AsyncPausedState
+      className="rounded-lg border px-3 py-2 text-xs"
+      title={t("app.requestPaused.title")}
+      message={t("app.requestPaused.message")}
+      retryLabel={t("common.retry")}
+      onRetry={onRetry}
+    />
+  );
+
+  return (
+    <AsyncContent
+      state={state}
+      refreshIntent="background"
+      loadingLabel={t("settings.loginPage.loadingAssets")}
+      skeleton={<Skeleton className="h-3 w-36" />}
+      initialError={errorState}
+      paused={pausedState}
+      inactive={null}
+      empty={<p className="text-xs pf-ink-muted">{t("settings.loginPage.noAssets")}</p>}
+      refreshFeedback={state.error === "refresh" ? errorState : state.fetch === "paused" ? pausedState : null}
+    >
+      <p className="text-xs pf-ink-muted">
+        {t("settings.loginPage.assetCount", { count: assetCount })}
+      </p>
+    </AsyncContent>
   );
 }

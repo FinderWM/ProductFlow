@@ -16,6 +16,8 @@ import { useNavigate } from "react-router-dom";
 
 import { ClassicTextInput } from "../components/classicInputs";
 import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { SkeletonMetrics, SkeletonRows } from "../components/loading/Skeleton";
 import { TopNav } from "../components/TopNav";
 import {
   ClassicDateTimeRangeField,
@@ -27,6 +29,7 @@ import {
 } from "../components/WorkspaceDateTimeRangeField";
 import { WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import { asyncViewStateFromQuery } from "../lib/asyncViewState";
 import { formatDateTime } from "../lib/format";
 import type { GenerationConfigStatAggregate, GenerationConfigStatusConfig } from "../lib/types";
 import { useI18n } from "../lib/preferences";
@@ -160,6 +163,7 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
   const [appliedRange, setAppliedRange] = useState<WorkspaceDateTimeRange>(range);
   const [activeQuickRange, setActiveQuickRange] = useState<WorkspaceQuickRangeId | null>("today");
   const [configSearch, setConfigSearch] = useState("");
+  const [userRefreshing, setUserRefreshing] = useState(false);
   const rangeInvalid = Boolean(range.start_date && range.end_date && range.start_date > range.end_date);
   const appliedRangeInvalid = Boolean(
     appliedRange.start_date && appliedRange.end_date && appliedRange.start_date > appliedRange.end_date,
@@ -171,6 +175,15 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
     queryFn: () => api.getGenerationConfigStatus(apiRange),
     enabled: !appliedRangeInvalid,
     retry: false,
+  });
+  const statusViewState = asyncViewStateFromQuery({
+    active: !appliedRangeInvalid,
+    data: statusQuery.data,
+    dataUpdatedAt: statusQuery.dataUpdatedAt,
+    isSuccess: statusQuery.isSuccess,
+    isError: statusQuery.isError,
+    fetchStatus: statusQuery.fetchStatus,
+    isEmpty: () => false,
   });
 
   const logoutMutation = useMutation({
@@ -199,9 +212,11 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
   const PageActionButton = actionButtonComponentForAppearance(isWorkspaceSubpage ? "workspace" : "classic");
   const refreshStatus = () => {
     if (range.start_date === appliedRange.start_date && range.end_date === appliedRange.end_date) {
-      void statusQuery.refetch();
+      setUserRefreshing(true);
+      void statusQuery.refetch().finally(() => setUserRefreshing(false));
       return;
     }
+    setUserRefreshing(false);
     setAppliedRange(range);
   };
 
@@ -268,7 +283,7 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
                   <PageActionButton
                     onClick={refreshStatus}
                     disabled={rangeInvalid}
-                    loading={statusQuery.isFetching}
+                    loading={userRefreshing && statusQuery.isFetching}
                     preset="primary"
                     size="md"
                     className="shrink-0"
@@ -285,16 +300,41 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
               ) : null}
             </section>
 
-            {statusQuery.isLoading ? (
-              <div className="flex justify-center py-20 text-zinc-400 dark:text-slate-500">
-                <Loader2 size={22} className="animate-spin" />
-              </div>
-            ) : statusQuery.isError ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-                {statusQuery.error instanceof ApiError ? statusQuery.error.detail : t("statusPage.loadFailed")}
-              </div>
-            ) : null}
-
+            <AsyncContent
+              state={statusViewState}
+              refreshIntent={userRefreshing ? "user-refresh" : "parameter-change"}
+              loadingLabel={t("app.loading")}
+              skeleton={(
+                <div className="space-y-5">
+                  <SkeletonMetrics count={6} className="xl:grid-cols-6" />
+                  <section className={`${PANEL_CLASS} px-5`}>
+                    <SkeletonRows count={6} />
+                  </section>
+                </div>
+              )}
+              initialError={(
+                <AsyncErrorState
+                  title={statusQuery.error instanceof ApiError ? statusQuery.error.detail : t("statusPage.loadFailed")}
+                  retryLabel={t("common.retry")}
+                  retryingLabel={t("app.loading")}
+                  retrying={statusQuery.isFetching}
+                  onRetry={() => {
+                    void statusQuery.refetch();
+                  }}
+                />
+              )}
+              paused={(
+                <AsyncPausedState
+                  title={t("app.requestPaused.title")}
+                  message={t("app.requestPaused.message")}
+                  retryLabel={t("common.retry")}
+                  onRetry={() => {
+                    void statusQuery.refetch();
+                  }}
+                />
+              )}
+              empty={null}
+            >
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
               <MetricCard
                 label={t("statusPage.metric.todayTotal")}
@@ -372,7 +412,7 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
                       />
                     )}
                   </label>
-                  {statusQuery.isFetching ? (
+                  {userRefreshing && statusQuery.isFetching ? (
                     <span className="inline-flex items-center text-xs font-semibold text-slate-500 dark:text-slate-400">
                       <Loader2 size={13} className="mr-1.5 animate-spin" />
                       {t("app.loading")}
@@ -391,6 +431,7 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
                 )}
               </div>
             </section>
+            </AsyncContent>
         </div>
           </div>
         </div>

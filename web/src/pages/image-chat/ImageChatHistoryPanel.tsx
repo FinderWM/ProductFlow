@@ -9,7 +9,10 @@ import {
   type ActionButtonToneVars,
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../components/loading/AsyncContent";
+import { Skeleton } from "../../components/loading/Skeleton";
 import type { PromptPreview } from "../../components/PromptPreviewDialog";
+import type { AsyncViewState } from "../../lib/asyncViewState";
 import { getVerticalWheelMappedScrollLeft } from "./resizableLayout";
 import type { ImageHistoryBranch } from "./branching";
 import type { ImageChatTranslate } from "./display";
@@ -28,6 +31,7 @@ function handleHistoryWheelScroll(event: WheelEvent, container: HTMLDivElement) 
 }
 
 interface ImageChatHistoryPanelProps {
+  state: AsyncViewState;
   historyBranches: ImageHistoryBranch[];
   selectedGeneratedAssetId: string | null;
   selectedTaskPlaceholderId: string | null;
@@ -39,6 +43,7 @@ interface ImageChatHistoryPanelProps {
   onSelectRound: (assetId: string) => void;
   onAddRoundToBase?: (assetId: string) => void;
   onSelectPlaceholder: (placeholderId: string) => void;
+  onRetry: () => void;
   onStartNewRound?: () => void;
   newRoundDisabled?: boolean;
   newRoundActive?: boolean;
@@ -49,6 +54,7 @@ interface ImageChatHistoryPanelProps {
 }
 
 export function ImageChatHistoryPanel({
+  state,
   historyBranches,
   selectedGeneratedAssetId,
   selectedTaskPlaceholderId,
@@ -60,6 +66,7 @@ export function ImageChatHistoryPanel({
   onSelectRound,
   onAddRoundToBase,
   onSelectPlaceholder,
+  onRetry,
   onStartNewRound,
   newRoundDisabled = false,
   newRoundActive = false,
@@ -68,6 +75,9 @@ export function ImageChatHistoryPanel({
   onPreviewPrompt,
   t,
 }: ImageChatHistoryPanelProps) {
+  const historyState: AsyncViewState = state.content === "ready" && historyBranches.length === 0
+    ? { ...state, content: "empty" }
+    : state;
   const ActionButton = actionButtonComponentForAppearance(appearance);
   const resizeHandleToneVars: ActionButtonToneVars = {
     ...transparentActionToneVars,
@@ -94,7 +104,7 @@ export function ImageChatHistoryPanel({
 
   if (variant === "mobileDrawer") {
     return (
-      <div className="flex min-h-0 flex-1 flex-col bg-white dark:bg-[#0f1726]">
+      <div className="relative flex min-h-0 flex-1 flex-col bg-white dark:bg-[#0f1726]">
         {onStartNewRound ? (
           <div className="border-b border-slate-200 px-2 py-2 dark:border-slate-800">
             <ActionButton
@@ -111,7 +121,54 @@ export function ImageChatHistoryPanel({
             </ActionButton>
           </div>
         ) : null}
-        {historyBranches.length ? (
+        <AsyncContent
+          state={historyState}
+          refreshIntent="background"
+          loadingLabel={t("app.loading")}
+          skeleton={(
+            <div className="min-h-0 flex-1 space-y-3 overflow-hidden px-2 py-3">
+              {[1, 2, 3].map((item) => <Skeleton key={item} className="h-24 w-full" rounded="lg" />)}
+            </div>
+          )}
+          inactive={(
+            <div className="flex min-h-0 flex-1 items-center justify-center px-3 py-6 text-center text-xs pf-ink-muted">
+              {t("chat.selectSession")}
+            </div>
+          )}
+          initialError={(
+            <AsyncErrorState
+              className="mx-2 my-3 rounded-xl border-[color:var(--pf-border)] pf-surface-soft px-3 py-3 text-xs text-[color:var(--pf-danger)]"
+              title={t("chat.loadSessionFailed")}
+              retryLabel={t("common.retry")}
+              retryingLabel={t("app.loading")}
+              retrying={historyState.fetch === "fetching"}
+              onRetry={onRetry}
+            />
+          )}
+          paused={(
+            <AsyncPausedState
+              className="mx-2 my-3 rounded-xl border-[color:var(--pf-border)] pf-surface-soft px-3 py-3 text-xs text-[color:var(--pf-accent-2)]"
+              title={t("app.requestPaused.title")}
+              message={t("app.requestPaused.message")}
+              retryLabel={t("common.retry")}
+              onRetry={onRetry}
+            />
+          )}
+          empty={(
+            <div className="flex min-h-0 flex-1 items-center justify-center px-2 py-6">
+              <div className="flex min-h-24 w-full items-center justify-center rounded-2xl border border-dashed pf-hairline px-2 text-center text-xs pf-ink-muted">
+                {t("chat.resultsAppearHere")}
+              </div>
+            </div>
+          )}
+          refreshFeedback={historyState.error === "refresh" ? (
+            <div className="absolute inset-x-2 bottom-2 z-20 flex items-center justify-between gap-2 rounded-lg border-[color:var(--pf-border)] pf-surface-soft px-2 py-1.5 text-[11px] text-[color:var(--pf-accent-2)] shadow-sm">
+              <span>{t("chat.loadSessionFailed")}</span>
+              <button type="button" className="font-semibold underline" onClick={onRetry}>{t("common.retry")}</button>
+            </div>
+          ) : null}
+          className="flex min-h-0 flex-1 flex-col"
+        >
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-2 py-3">
             {historyBranches.map((branch) => (
               <HistoryBranchStrip
@@ -131,13 +188,7 @@ export function ImageChatHistoryPanel({
               />
             ))}
           </div>
-        ) : (
-          <div className="flex min-h-0 flex-1 items-center justify-center px-2 py-6">
-            <div className="flex min-h-24 w-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-2 text-center text-xs text-slate-400 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-500">
-              {t("chat.resultsAppearHere")}
-            </div>
-          </div>
-        )}
+        </AsyncContent>
       </div>
     );
   }
@@ -188,7 +239,52 @@ export function ImageChatHistoryPanel({
         </div>
       </div>
 
-      {historyBranches.length ? (
+      <AsyncContent
+        state={historyState}
+        refreshIntent="background"
+        loadingLabel={t("app.loading")}
+        skeleton={(
+          <div className="flex min-h-20 flex-1 gap-3 overflow-hidden pb-1">
+            {[1, 2, 3, 4].map((item) => <Skeleton key={item} className="h-full min-w-36 flex-1" rounded="lg" />)}
+          </div>
+        )}
+        inactive={(
+          <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl border border-dashed pf-hairline pf-surface-soft text-sm pf-ink-muted">
+            {t("chat.selectSession")}
+          </div>
+        )}
+        initialError={(
+          <AsyncErrorState
+            className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border-[color:var(--pf-border)] pf-surface-soft px-4 text-center text-sm text-[color:var(--pf-danger)]"
+            title={t("chat.loadSessionFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={historyState.fetch === "fetching"}
+            onRetry={onRetry}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border-[color:var(--pf-border)] pf-surface-soft px-4 text-center text-sm text-[color:var(--pf-accent-2)]"
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={onRetry}
+          />
+        )}
+        empty={(
+          <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl border border-dashed pf-hairline pf-surface-soft text-sm pf-ink-muted">
+            {t("chat.resultsAppearHere")}
+          </div>
+        )}
+        refreshFeedback={historyState.error === "refresh" ? (
+          <div className="absolute bottom-2 right-3 z-20 flex items-center gap-3 rounded-lg border-[color:var(--pf-border)] pf-surface-soft px-3 py-2 text-xs text-[color:var(--pf-accent-2)] shadow-sm">
+            <span>{t("chat.loadSessionFailed")}</span>
+            <button type="button" className="font-semibold underline" onClick={onRetry}>{t("common.retry")}</button>
+          </div>
+        ) : null}
+        className="flex min-h-0 flex-1 flex-col"
+      >
         <div
           ref={desktopHistoryScrollRef}
           className="image-chat-history-scroll flex min-h-0 flex-1 gap-3 overflow-x-auto overscroll-x-contain pb-1"
@@ -210,11 +306,7 @@ export function ImageChatHistoryPanel({
             />
           ))}
         </div>
-      ) : (
-        <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-400 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-500">
-          {t("chat.resultsAppearHere")}
-        </div>
-      )}
+      </AsyncContent>
     </div>
   );
 }

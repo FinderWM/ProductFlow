@@ -8,6 +8,8 @@ import {
 } from "../../components/layoutActionButtons";
 import { ClipboardImageButton } from "../../components/ClipboardImageButton";
 import { ImageDropZone } from "../../components/ImageDropZone";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../components/loading/AsyncContent";
+import { Skeleton } from "../../components/loading/Skeleton";
 import { MediaPreviewTrigger } from "../../components/MediaPreviewTrigger";
 import { ParameterHelpLabel } from "../../components/ParameterHelp";
 import {
@@ -18,6 +20,7 @@ import {
 import { ClassicCheckbox, ClassicSelectField } from "../../components/classicInputs";
 import { WorkspaceCheckbox, WorkspaceSelectField } from "../../components/workspaceInputs";
 import { api } from "../../lib/api";
+import type { AsyncViewState } from "../../lib/asyncViewState";
 import { formatImageSizeValue } from "../../lib/imageSizes";
 import type { ImageSessionAsset, ImageSessionRound, InspirationDetail, InspirationSummary, SourceAsset } from "../../lib/types";
 import type { ImageChatTranslate } from "./display";
@@ -200,6 +203,7 @@ export function SessionReferencePanel({
 }
 
 interface InspirationAssociationPanelProps {
+  state: AsyncViewState;
   isInspirationMode: boolean;
   inspiration: InspirationDetail | undefined;
   inspirations: InspirationSummary[];
@@ -213,6 +217,7 @@ interface InspirationAssociationPanelProps {
   onDeleteReference: (assetId: string) => void;
   onPreviewReference: (asset: SourceAsset) => void;
   onAttach: (target: "reference" | "main_source") => void;
+  onRetry: () => void;
   saveBlockedTitle?: string | null;
   editBlockedTitle?: string | null;
   t: ImageChatTranslate;
@@ -220,6 +225,7 @@ interface InspirationAssociationPanelProps {
 }
 
 export function InspirationAssociationPanel({
+  state,
   isInspirationMode,
   inspiration,
   inspirations,
@@ -233,6 +239,7 @@ export function InspirationAssociationPanel({
   onDeleteReference,
   onPreviewReference,
   onAttach,
+  onRetry,
   saveBlockedTitle = null,
   editBlockedTitle = null,
   t,
@@ -247,10 +254,58 @@ export function InspirationAssociationPanel({
   const missingTargetTitle = inspirations.length ? t("chat.selectInspirationFirst") : t("chat.noInspirations");
   const saveDisabledTitle =
     saveBlockedTitle ?? (!selectedRound ? t("chat.selectHistoryFirst") : !isInspirationMode && !targetInspirationId ? missingTargetTitle : "");
+  const panelClassName = "rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700/80 dark:bg-[#151f33]";
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700/80 dark:bg-[#151f33]">
+    <div className={panelClassName}>
       <div className="mb-3 text-sm font-semibold text-zinc-900 dark:text-white">{t("chat.saveToInspiration")}</div>
+      <AsyncContent
+        state={state}
+        refreshIntent="parameter-change"
+        loadingLabel={t("app.loading")}
+        skeleton={(
+          <div className="space-y-3">
+            <Skeleton className="h-9 w-full" />
+            <div className="grid grid-cols-4 gap-2">
+              {[1, 2, 3, 4].map((item) => <Skeleton key={item} className="h-16 w-full" rounded="lg" />)}
+            </div>
+            <Skeleton className="h-10 w-full" />
+          </div>
+        )}
+        inactive={(
+          <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
+            {t("chat.resourceGroupRequired")}
+          </div>
+        )}
+        initialError={(
+          <AsyncErrorState
+            title={t("chat.loadInspirationsFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={state.fetch === "fetching"}
+            onRetry={onRetry}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={onRetry}
+          />
+        )}
+        empty={(
+          <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/45 dark:text-slate-300">
+            {t("chat.noInspirations")}
+          </div>
+        )}
+        refreshFeedback={state.error === "refresh" ? (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+            <span>{t("chat.loadInspirationsFailed")}</span>
+            <button type="button" className="font-semibold underline" onClick={onRetry}>{t("common.retry")}</button>
+          </div>
+        ) : null}
+      >
       {isInspirationMode ? (
         inspiration ? (
           <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3">
@@ -262,8 +317,8 @@ export function InspirationAssociationPanel({
             </div>
           </div>
         ) : (
-          <div className="flex justify-center py-6 text-zinc-400">
-            <Loader2 size={16} className="animate-spin" />
+          <div className="py-6 text-center text-sm text-zinc-500 dark:text-slate-400">
+            {t("chat.loadInspirationsFailed")}
           </div>
         )
       ) : (
@@ -369,6 +424,7 @@ export function InspirationAssociationPanel({
           ) : null}
         </div>
       </div>
+      </AsyncContent>
     </div>
   );
 }

@@ -5,7 +5,6 @@ import {
   ImageIcon,
   ImagePlus,
   Layers3,
-  Loader2,
   Maximize2,
   Pencil,
   Presentation,
@@ -30,7 +29,10 @@ import {
   actionButtonComponentForAppearance,
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../components/loading/AsyncContent";
+import { Skeleton, SkeletonRows } from "../../components/loading/Skeleton";
 import { WorkspaceOptionToggle, WorkspaceSelectField, WorkspaceTextInput } from "../../components/workspaceInputs";
+import { asyncViewPhase, type AsyncViewState } from "../../lib/asyncViewState";
 import { localizeCanvasTemplateSummary } from "../../lib/canvasTemplateLocalization";
 import type { TranslationKey } from "../../lib/i18n";
 import { useI18n } from "../../lib/preferences";
@@ -84,16 +86,16 @@ type TFunction = (key: TranslationKey, params?: Record<string, string | number>)
 interface TemplateGroupsPanelProps {
   templates: CanvasTemplateSummary[];
   categories: CanvasTemplateCategory[];
-  isLoading: boolean;
-  isError: boolean;
-  categoriesLoading: boolean;
-  categoriesError: boolean;
+  templatesState: AsyncViewState;
+  categoriesState: AsyncViewState;
   templateSearch: string;
   selectedCategoryId: string;
   templateScope: TemplateScopeFilter;
   onTemplateSearchChange: (value: string) => void;
   onSelectedCategoryIdChange: (value: string) => void;
   onTemplateScopeChange: (value: TemplateScopeFilter) => void;
+  onRetryTemplates: () => void;
+  onRetryCategories: () => void;
   structureBusy: boolean;
   applyBusy: boolean;
   applyingTemplateKey: string | null;
@@ -669,16 +671,16 @@ function TemplatePreviewDialog({
 export function TemplateGroupsPanel({
   templates,
   categories,
-  isLoading,
-  isError,
-  categoriesLoading,
-  categoriesError,
+  templatesState,
+  categoriesState,
   templateSearch,
   selectedCategoryId,
   templateScope,
   onTemplateSearchChange,
   onSelectedCategoryIdChange,
   onTemplateScopeChange,
+  onRetryTemplates,
+  onRetryCategories,
   structureBusy,
   applyBusy,
   applyingTemplateKey,
@@ -727,6 +729,8 @@ export function TemplateGroupsPanel({
   const LayoutTextInput = workspaceSubpage ? WorkspaceTextInput : ClassicTextInput;
   const LayoutSelectField = workspaceSubpage ? WorkspaceSelectField : ClassicSelectField;
   const LayoutOptionToggle = workspaceSubpage ? WorkspaceOptionToggle : ClassicOptionToggle;
+  const categoriesPhase = asyncViewPhase(categoriesState);
+  const categoriesResolved = categoriesPhase === "empty" || categoriesPhase === "ready";
 
   return (
     <section className="space-y-3">
@@ -755,7 +759,7 @@ export function TemplateGroupsPanel({
           <LayoutSelectField
             value={selectedCategoryId}
             onChange={onSelectedCategoryIdChange}
-            disabled={categoriesLoading || categoriesError}
+            disabled={!categoriesResolved}
             size="compact"
             ariaLabel={t("templateFilter.category")}
             options={[
@@ -799,25 +803,103 @@ export function TemplateGroupsPanel({
           </div>
         </div>
 
-        {categoriesError ? (
-          <div className="text-xs text-red-600 dark:text-red-300">{t("templateFilter.categoriesLoadFailed")}</div>
-        ) : null}
+        <AsyncContent
+          state={categoriesState}
+          refreshIntent="background"
+          loadingLabel={t("app.loading")}
+          skeleton={<Skeleton className="h-3 w-40" />}
+          initialError={(
+            <AsyncErrorState
+              className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+              title={t("templateFilter.categoriesLoadFailed")}
+              retryLabel={t("common.retry")}
+              retryingLabel={t("app.loading")}
+              retrying={categoriesState.fetch === "fetching"}
+              onRetry={onRetryCategories}
+            />
+          )}
+          paused={(
+            <AsyncPausedState
+              className="rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-100"
+              title={t("app.requestPaused.title")}
+              message={t("app.requestPaused.message")}
+              retryLabel={t("common.retry")}
+              onRetry={onRetryCategories}
+            />
+          )}
+          inactive={null}
+          empty={null}
+          refreshFeedback={
+            categoriesState.error === "refresh" ? (
+              <div className="flex items-center justify-between gap-2 text-xs text-red-600 dark:text-red-300">
+                <span>{t("templateFilter.categoriesLoadFailed")}</span>
+                <PageActionButton
+                  preset="secondary"
+                  size="sm"
+                  className="shrink-0 text-xs"
+                  onClick={onRetryCategories}
+                >
+                  {t("common.retry")}
+                </PageActionButton>
+              </div>
+            ) : null
+          }
+        >
+          {null}
+        </AsyncContent>
       </div>
 
-      {isLoading ? (
-        <div className="flex min-h-[180px] items-center justify-center text-zinc-400 dark:text-slate-500">
-          <Loader2 size={20} className="animate-spin" />
-        </div>
-      ) : isError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-          {t("detail.template.loadFailed")}
-        </div>
-      ) : !templates.length ? (
-        <div className="glass-empty-state flex min-h-[160px] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-zinc-500 dark:text-slate-400">
-          <Layers3 size={18} className="text-indigo-500 opacity-80 dark:text-violet-400" />
-          <div>{t("detail.template.empty")}</div>
-        </div>
-      ) : (
+      <AsyncContent
+        state={templatesState}
+        refreshIntent="parameter-change"
+        loadingLabel={t("app.loading")}
+        skeleton={<SkeletonRows count={5} />}
+        inactive={<SkeletonRows count={5} />}
+        initialError={(
+          <AsyncErrorState
+            title={t("detail.template.loadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={templatesState.fetch === "fetching"}
+            onRetry={onRetryTemplates}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={onRetryTemplates}
+          />
+        )}
+        empty={(
+          <div className="glass-empty-state flex min-h-[160px] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-zinc-500 dark:text-slate-400">
+            <Layers3 size={18} className="text-indigo-500 opacity-80 dark:text-violet-400" />
+            <div>{t("detail.template.empty")}</div>
+          </div>
+        )}
+        refreshFeedback={
+          templatesState.error === "refresh" ? (
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+              <span>{t("detail.template.loadFailed")}</span>
+              <PageActionButton
+                preset="secondary"
+                size="sm"
+                className="shrink-0 text-xs"
+                onClick={onRetryTemplates}
+              >
+                {t("common.retry")}
+              </PageActionButton>
+            </div>
+          ) : null
+        }
+      >
+        {!templates.length ? (
+          <div className="glass-empty-state flex min-h-[160px] flex-col items-center justify-center gap-2 p-6 text-center text-xs text-zinc-500 dark:text-slate-400">
+            <Layers3 size={18} className="text-indigo-500 opacity-80 dark:text-violet-400" />
+            <div>{t("detail.template.empty")}</div>
+          </div>
+        ) : (
         <>
 	          <div className="flex gap-1 overflow-x-auto border-b border-slate-200/50 pb-2 dark:border-slate-800">
 	            {TEMPLATE_CATEGORY_ORDER.filter((category) => category.key === "all" || categoryCounts[category.key] > 0).map(
@@ -1019,7 +1101,8 @@ export function TemplateGroupsPanel({
       })}
           </div>
         </>
-      )}
+        )}
+      </AsyncContent>
       {previewTemplate ? (
         <TemplatePreviewDialog
           template={previewTemplate}

@@ -3,12 +3,15 @@ import {
   actionButtonComponentForAppearance,
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../components/loading/AsyncContent";
+import { Skeleton, SkeletonCards } from "../../components/loading/Skeleton";
 import {
   isResourceBlocked,
   ResourceBlockedNotice,
   ResourceMetaBadges,
 } from "../../components/ResourceGovernance";
 import { ModalShell } from "../../components/ModalShell";
+import type { AsyncViewState } from "../../lib/asyncViewState";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import { useI18n } from "../../lib/preferences";
 import type { PosterVariant, InspirationDetail, SourceAsset, WorkflowNode } from "../../lib/types";
@@ -23,6 +26,10 @@ interface ImagesPanelProps {
   posters: PosterVariant[];
   referenceAssets: SourceAsset[];
   artifactCount: number;
+  state: AsyncViewState;
+  onRetry: () => void;
+  resourceStatusState: AsyncViewState;
+  onRetryResourceStatus: () => void;
   selectedReferenceNode: WorkflowNode | null;
   posterSourceAssetIds: Map<string, string>;
   onPreviewImage: (image: DownloadableImage) => void;
@@ -46,6 +53,10 @@ export function ImagesPanel({
   posters,
   referenceAssets,
   artifactCount,
+  state,
+  onRetry,
+  resourceStatusState,
+  onRetryResourceStatus,
   selectedReferenceNode,
   posterSourceAssetIds,
   onPreviewImage,
@@ -111,10 +122,91 @@ export function ImagesPanel({
                 ) : (
                   <div>{t("detail.selectImageNodeFirst")}</div>
                 )}
+                {resourceStatusState.error !== "none" || resourceStatusState.fetch === "fetching" ? (
+                  <AsyncContent
+                    state={resourceStatusState}
+                    refreshIntent="background"
+                    loadingLabel={t("app.loading")}
+                    skeleton={<Skeleton className="h-3 w-44" />}
+                    initialError={(
+                      <AsyncErrorState
+                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+                        title={t("resourceLibrary.sourceStatusLoadFailed")}
+                        retryLabel={t("common.retry")}
+                        retryingLabel={t("app.loading")}
+                        retrying={resourceStatusState.fetch === "fetching"}
+                        onRetry={onRetryResourceStatus}
+                      />
+                    )}
+                    paused={(
+                      <AsyncPausedState
+                        className="rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-100"
+                        title={t("app.requestPaused.title")}
+                        message={t("app.requestPaused.message")}
+                        retryLabel={t("common.retry")}
+                        onRetry={onRetryResourceStatus}
+                      />
+                    )}
+                    inactive={null}
+                    empty={null}
+                    refreshFeedback={
+                      resourceStatusState.error === "refresh" ? (
+                        <div className="flex items-center justify-between gap-2 text-xs text-red-600 dark:text-red-300">
+                          <span>{t("resourceLibrary.sourceStatusLoadFailed")}</span>
+                          <button type="button" className="font-semibold underline" onClick={onRetryResourceStatus}>
+                            {t("common.retry")}
+                          </button>
+                        </div>
+                      ) : null
+                    }
+                  >
+                    {null}
+                  </AsyncContent>
+                ) : null}
                 </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+            <AsyncContent
+              state={state}
+              refreshIntent="background"
+              loadingLabel={t("app.loading")}
+              className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4"
+              skeleton={<SkeletonCards count={8} className="grid-cols-2 sm:grid-cols-3 xl:grid-cols-4" />}
+              initialError={(
+                <AsyncErrorState
+                  title={t("detail.images.loadFailed")}
+                  retryLabel={t("common.retry")}
+                  retryingLabel={t("app.loading")}
+                  retrying={state.fetch === "fetching"}
+                  onRetry={onRetry}
+                />
+              )}
+              paused={(
+                <AsyncPausedState
+                  title={t("app.requestPaused.title")}
+                  message={t("app.requestPaused.message")}
+                  retryLabel={t("common.retry")}
+                  onRetry={onRetry}
+                />
+              )}
+              inactive={null}
+              empty={(
+                <div className="glass-empty-state flex min-h-[320px] flex-col items-center justify-center gap-2 p-6 text-center text-xs leading-relaxed text-zinc-500 dark:text-slate-400">
+                  <ImageIcon size={20} className="text-indigo-500 opacity-80 dark:text-violet-400" />
+                  <div>{t("detail.noImages")}</div>
+                </div>
+              )}
+              refreshFeedback={
+                state.error === "refresh" ? (
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                    <span>{t("detail.images.loadFailed")}</span>
+                    <button type="button" className="font-semibold underline" onClick={onRetry}>
+                      {t("common.retry")}
+                    </button>
+                  </div>
+                ) : null
+              }
+            >
               {artifactCount ? (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
           {posters.map((poster) => {
@@ -196,7 +288,7 @@ export function ImagesPanel({
                   <div>{t("detail.noImages")}</div>
                 </div>
               )}
-            </div>
+            </AsyncContent>
     </ModalShell>
   );
 }

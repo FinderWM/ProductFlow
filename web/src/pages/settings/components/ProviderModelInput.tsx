@@ -10,6 +10,7 @@ import { FloatingSurface } from "../../../components/FloatingSurface";
 import { ParameterHelpLabel } from "../../../components/ParameterHelp";
 import { WorkspaceTextInput } from "../../../components/workspaceInputs";
 import { api } from "../../../lib/api";
+import { asyncViewPhase, asyncViewStateFromQuery } from "../../../lib/asyncViewState";
 import type { ParameterHelpKey } from "../../../lib/parameterHelp";
 import { useI18n } from "../../../lib/preferences";
 import type { ProviderModel } from "../../../lib/types";
@@ -71,6 +72,16 @@ export function ProviderModelInput({
     gcTime: PROVIDER_MODELS_QUERY_GC_TIME_MS,
     retry: false,
   });
+  const modelsState = asyncViewStateFromQuery({
+    active: modelsQueryEnabled,
+    data: modelsQuery.data,
+    dataUpdatedAt: modelsQuery.dataUpdatedAt,
+    isSuccess: modelsQuery.isSuccess,
+    isError: modelsQuery.isError,
+    fetchStatus: modelsQuery.fetchStatus,
+    isEmpty: (data) => data.models.length === 0,
+  });
+  const modelsPhase = asyncViewPhase(modelsState);
   const models = modelsQuery.data?.models ?? [];
   const filteredModels = filterProviderModels(models, value);
   const statusText =
@@ -78,12 +89,20 @@ export function ProviderModelInput({
       ? ""
       : !providerProfileId
         ? t("settings.provider.modelSelectProfileFirst")
-        : !modelsQueryEnabled && models.length === 0 && !modelsQuery.error
+        : modelsPhase === "inactive"
           ? ""
-        : modelsQuery.isLoading || modelsQuery.isFetching
-          ? t("settings.provider.modelsLoading")
-          : providerModelsStatusText(models, modelsQuery.error, t);
-  const statusClassName = modelsQuery.error
+          : modelsPhase === "loading"
+            ? t("settings.provider.modelsLoading")
+            : modelsPhase === "paused"
+              ? t("app.requestPaused.title")
+              : modelsPhase === "initial-idle"
+                ? t("settings.provider.modelsLoadFailed")
+                : modelsState.error !== "none"
+                  ? providerModelsStatusText(models, modelsQuery.error, t)
+                  : modelsQuery.isFetching
+                    ? t("settings.provider.modelsLoading")
+                    : providerModelsStatusText(models, null, t);
+  const statusClassName = modelsState.error !== "none"
     ? "text-red-600 dark:text-red-300"
     : "text-slate-500 dark:text-slate-400";
   const canOpenModels = !disabled && canFetchModels && models.length > 0;

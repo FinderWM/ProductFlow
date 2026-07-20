@@ -1,16 +1,19 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { Check, Loader2, Tags, X } from "lucide-react";
+import { Check, Tags, X } from "lucide-react";
 
+import { asyncViewPhase, type AsyncViewState } from "../lib/asyncViewState";
 import type { GalleryTag } from "../lib/types";
 import { useI18n } from "../lib/preferences";
 import { actionButtonComponentForAppearance, type LayoutActionAppearance } from "./layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "./loading/AsyncContent";
+import { Skeleton } from "./loading/Skeleton";
 import { ModalShell } from "./ModalShell";
 
 interface GalleryTagPickerDialogProps {
   open: boolean;
   appearance: LayoutActionAppearance;
   tags: GalleryTag[];
-  loading?: boolean;
+  state: AsyncViewState;
   initialSelectedTagIds?: string[];
   title?: string;
   description?: string;
@@ -19,9 +22,12 @@ interface GalleryTagPickerDialogProps {
   required?: boolean;
   busy?: boolean;
   error?: string;
+  onRetry: () => void;
   onConfirm: (tagIds: string[]) => void;
   onClose: () => void;
 }
+
+const EMPTY_GALLERY_TAG_IDS: string[] = [];
 
 function uniqueExistingTagIds(tagIds: readonly string[], tags: readonly GalleryTag[]): string[] {
   const existingIds = new Set(tags.map((tag) => tag.id));
@@ -39,8 +45,8 @@ export function GalleryTagPickerDialog({
   open,
   appearance,
   tags,
-  loading = false,
-  initialSelectedTagIds = [],
+  state,
+  initialSelectedTagIds = EMPTY_GALLERY_TAG_IDS,
   title,
   description,
   confirmLabel,
@@ -48,6 +54,7 @@ export function GalleryTagPickerDialog({
   required = false,
   busy = false,
   error = "",
+  onRetry,
   onConfirm,
   onClose,
 }: GalleryTagPickerDialogProps) {
@@ -58,6 +65,7 @@ export function GalleryTagPickerDialog({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [unselectedTagIds, setUnselectedTagIds] = useState<string[]>([]);
   const [localError, setLocalError] = useState("");
+  const phase = asyncViewPhase(state);
   const normalizedMaxSelection =
     typeof maxSelection === "number" && Number.isFinite(maxSelection) ? Math.max(1, Math.floor(maxSelection)) : null;
   const tagsById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
@@ -71,7 +79,7 @@ export function GalleryTagPickerDialog({
   });
 
   useEffect(() => {
-    if (!open) {
+    if (!open || (phase !== "ready" && phase !== "empty")) {
       return;
     }
     const initialSelected = uniqueExistingTagIds(initialSelectedTagIds, tags);
@@ -81,7 +89,7 @@ export function GalleryTagPickerDialog({
     setSelectedTagIds(boundedInitialSelected);
     setUnselectedTagIds(tags.filter((tag) => !initialSelectedSet.has(tag.id)).map((tag) => tag.id));
     setLocalError("");
-  }, [initialSelectedTagIds, normalizedMaxSelection, open, tags]);
+  }, [initialSelectedTagIds, normalizedMaxSelection, open, phase, tags]);
 
   if (!open) {
     return null;
@@ -137,6 +145,41 @@ export function GalleryTagPickerDialog({
       ? t("gallery.tags.saveDialogDescriptionUnlimited")
       : t("gallery.tags.saveDialogDescription", { count: normalizedMaxSelection }));
   const dialogConfirmLabel = confirmLabel ?? t("common.save");
+  const tagSections = (
+    <>
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-bold uppercase text-slate-400 dark:text-slate-500">
+            {t("gallery.tags.selected")}
+          </div>
+          <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+            {normalizedMaxSelection === null
+              ? selectedTagIds.length
+              : `${selectedTagIds.length}/${normalizedMaxSelection}`}
+          </div>
+        </div>
+        <div className="flex min-h-12 flex-wrap content-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-950/35">
+          {selectedTags.length ? (
+            selectedTags.map((tag) => renderTagButton(tag, true))
+          ) : (
+            <span className="text-sm text-slate-400 dark:text-slate-500">{t("gallery.tags.noneSelected")}</span>
+          )}
+        </div>
+      </section>
+      <section className="mt-5 space-y-2">
+        <div className="text-xs font-bold uppercase text-slate-400 dark:text-slate-500">
+          {t("gallery.tags.unselected")}
+        </div>
+        <div className="flex min-h-20 flex-wrap content-start gap-2 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-950/20">
+          {unselectedTags.length ? (
+            unselectedTags.map((tag) => renderTagButton(tag, false))
+          ) : (
+            <span className="text-sm text-slate-400 dark:text-slate-500">{t("gallery.tags.noAvailable")}</span>
+          )}
+        </div>
+      </section>
+    </>
+  );
 
   return (
     <ModalShell
@@ -168,47 +211,56 @@ export function GalleryTagPickerDialog({
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        <section className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-bold uppercase text-slate-400 dark:text-slate-500">
-              {t("gallery.tags.selected")}
+        <AsyncContent
+          state={state}
+          refreshIntent="background"
+          loadingLabel={t("gallery.tags.loading")}
+          skeleton={(
+            <div className="space-y-5">
+              {[1, 2].map((section) => (
+                <div key={section} className="space-y-2">
+                  <Skeleton className="h-3 w-24" />
+                  <div className="flex min-h-16 flex-wrap gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                    {[1, 2, 3, 4].map((item) => (
+                      <Skeleton key={item} className="h-8 w-24" rounded="lg" />
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-              {normalizedMaxSelection === null
-                ? selectedTagIds.length
-                : `${selectedTagIds.length}/${normalizedMaxSelection}`}
-            </div>
-          </div>
-          <div className="flex min-h-12 flex-wrap content-start gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-950/35">
-            {loading ? (
-              <span className="inline-flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500">
-                <Loader2 size={14} className="animate-spin" />
-                {t("app.loading")}
-              </span>
-            ) : selectedTags.length ? (
-              selectedTags.map((tag) => renderTagButton(tag, true))
-            ) : (
-              <span className="text-sm text-slate-400 dark:text-slate-500">{t("gallery.tags.noneSelected")}</span>
-            )}
-          </div>
-        </section>
-        <section className="mt-5 space-y-2">
-          <div className="text-xs font-bold uppercase text-slate-400 dark:text-slate-500">
-            {t("gallery.tags.unselected")}
-          </div>
-          <div className="flex min-h-20 flex-wrap content-start gap-2 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-950/20">
-            {loading ? (
-              <span className="inline-flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500">
-                <Loader2 size={14} className="animate-spin" />
-                {t("app.loading")}
-              </span>
-            ) : unselectedTags.length ? (
-              unselectedTags.map((tag) => renderTagButton(tag, false))
-            ) : (
-              <span className="text-sm text-slate-400 dark:text-slate-500">{t("gallery.tags.noAvailable")}</span>
-            )}
-          </div>
-        </section>
+          )}
+          initialError={(
+            <AsyncErrorState
+              title={t("gallery.tags.loadFailed")}
+              retryLabel={t("common.retry")}
+              retryingLabel={t("gallery.tags.loading")}
+              retrying={state.fetch === "fetching"}
+              onRetry={onRetry}
+            />
+          )}
+          paused={(
+            <AsyncPausedState
+              title={t("app.requestPaused.title")}
+              message={t("app.requestPaused.message")}
+              retryLabel={t("common.retry")}
+              onRetry={onRetry}
+            />
+          )}
+          inactive={null}
+          empty={tagSections}
+          refreshFeedback={
+            state.error === "refresh" ? (
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                <span>{t("gallery.tags.loadFailed")}</span>
+                <button type="button" className="font-semibold underline" onClick={onRetry}>
+                  {t("common.retry")}
+                </button>
+              </div>
+            ) : null
+          }
+        >
+          {tagSections}
+        </AsyncContent>
         {visibleError ? (
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
             {visibleError}
@@ -227,8 +279,8 @@ export function GalleryTagPickerDialog({
         </ActionButtonComponent>
         <ActionButtonComponent
           onClick={handleConfirm}
-          disabled={loading}
-          loading={busy || loading}
+          disabled={phase !== "ready" && phase !== "empty"}
+          loading={busy}
           preset="primary"
           size="md"
           className="min-w-20"

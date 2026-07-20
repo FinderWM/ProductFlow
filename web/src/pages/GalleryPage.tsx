@@ -15,7 +15,6 @@ import {
   Check,
   Copy,
   Image as ImageIcon,
-  Loader2,
   MoreHorizontal,
   Pencil,
   RotateCcw,
@@ -32,11 +31,14 @@ import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
 import { GalleryImagePreviewDialog } from "../components/GalleryImagePreviewDialog";
 import { MediaPreviewTrigger } from "../components/MediaPreviewTrigger";
 import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { Skeleton, SkeletonCards } from "../components/loading/Skeleton";
 import { ModalShell } from "../components/ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges } from "../components/ResourceGovernance";
 import { TopNav } from "../components/TopNav";
 import { WorkspaceTextInput, WorkspaceTextarea } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import { asyncViewPhase, asyncViewStateFromQuery } from "../lib/asyncViewState";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { formatDateTime } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
@@ -277,6 +279,25 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
     queryFn: () => api.listGalleryTags({ include_disabled: true }),
     enabled: tagManageOpen && canManageGalleryTags,
   });
+  const galleryTagsState = asyncViewStateFromQuery({
+    active: true,
+    data: galleryTagsQuery.data,
+    dataUpdatedAt: galleryTagsQuery.dataUpdatedAt,
+    isSuccess: galleryTagsQuery.isSuccess,
+    isError: galleryTagsQuery.isError,
+    fetchStatus: galleryTagsQuery.fetchStatus,
+    isEmpty: (data) => data.length === 0,
+  });
+  const galleryTagsPhase = asyncViewPhase(galleryTagsState);
+  const manageGalleryTagsState = asyncViewStateFromQuery({
+    active: tagManageOpen && canManageGalleryTags,
+    data: manageGalleryTagsQuery.data,
+    dataUpdatedAt: manageGalleryTagsQuery.dataUpdatedAt,
+    isSuccess: manageGalleryTagsQuery.isSuccess,
+    isError: manageGalleryTagsQuery.isError,
+    fetchStatus: manageGalleryTagsQuery.fetchStatus,
+    isEmpty: (data) => data.length === 0,
+  });
   const galleryQuery = useQuery({
     queryKey: galleryQueryKey,
     queryFn: () =>
@@ -294,10 +315,23 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   const galleryGridStageStyle: CSSProperties | undefined = galleryGridHoldHeight
     ? { minHeight: galleryGridHoldHeight }
     : undefined;
-  const galleryInitialLoading = galleryQuery.isPending && !galleryLoadedOnce;
-  const galleryInitialError = galleryQuery.isError && !galleryLoadedOnce;
-  const galleryGridLoading = galleryLoadedOnce && (galleryQuery.isPending || !galleryRevealReady);
-  const galleryRefreshError = galleryQuery.isError && galleryLoadedOnce;
+  const galleryViewState = asyncViewStateFromQuery({
+    active: true,
+    data: galleryQuery.data,
+    dataUpdatedAt: galleryQuery.dataUpdatedAt,
+    isSuccess: galleryQuery.isSuccess,
+    isError: galleryQuery.isError,
+    fetchStatus: galleryQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const galleryDisplayState = galleryQuery.isSuccess && !galleryRevealReady
+    ? {
+        participation: "active" as const,
+        content: "none" as const,
+        fetch: "fetching" as const,
+        error: "none" as const,
+      }
+    : galleryViewState;
   const galleryTags = galleryTagsQuery.data ?? [];
   const manageableGalleryTags = manageGalleryTagsQuery.data ?? [];
   const galleryTagsById = useMemo(() => new Map(galleryTags.map((tag) => [tag.id, tag])), [galleryTags]);
@@ -424,8 +458,6 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
     };
   }, [
     activeScheme,
-    galleryInitialError,
-    galleryInitialLoading,
     orderedFilterTags,
     locale,
     mode,
@@ -670,9 +702,6 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
   const galleryFilterEmptyTextClassName = isWorkspaceManage
     ? "text-sm font-medium text-white/55 dark:text-slate-400"
     : "text-sm font-medium text-slate-500 dark:text-slate-400";
-  const galleryLoadingStateClassName = isWorkspaceManage
-    ? "mx-auto flex min-h-[320px] max-w-7xl items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-sm font-semibold text-white/70 dark:border-slate-700 dark:bg-slate-950/25 dark:text-slate-300"
-    : "mx-auto flex min-h-[320px] max-w-7xl items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-sm font-semibold text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950/30 dark:text-slate-300";
   const galleryEmptyStateClassName = isWorkspaceManage
     ? "mx-auto flex min-h-[320px] max-w-7xl flex-col items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/5 px-6 py-10 text-center text-sm text-white/65 dark:border-slate-700 dark:bg-slate-950/25 dark:text-slate-400"
     : "mx-auto flex min-h-[320px] max-w-7xl flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white/80 px-6 py-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-950/30 dark:text-slate-400";
@@ -922,15 +951,6 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
       <main className={isWorkspaceManage ? "pf-workspace-subpage flex-1" : "w-full"}>
         <div className={isWorkspaceManage ? "pf-workspace-subpage-frame-shell" : "contents"}>
           <div className={isWorkspaceManage ? "pf-workspace-subpage-frame" : "contents"}>
-        {galleryInitialLoading ? (
-          <div className="flex min-h-[calc(100svh-80px)] items-center justify-center bg-[#f3eadc] text-slate-500">
-            <Loader2 size={28} className="animate-spin" />
-          </div>
-        ) : galleryInitialError ? (
-          <div className="flex min-h-[calc(100svh-80px)] items-center justify-center bg-[#f3eadc] px-6 text-sm font-medium text-red-700">
-            {t("gallery.loadFailed")}
-          </div>
-        ) : (
           <>
             {isWorkspaceManage ? (
               <section className="pf-workspace-subpage-header flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -1026,9 +1046,29 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                       );
                     })
                   ) : (
-                    <span className={galleryFilterEmptyTextClassName}>
-                      {galleryTagsQuery.isLoading ? t("gallery.tags.loading") : t("gallery.tags.noAvailable")}
-                    </span>
+                    galleryTagsPhase === "loading" || galleryTagsPhase === "inactive" ? (
+                      <span className="inline-flex items-center gap-2" role="status" aria-busy="true">
+                        <span className="sr-only">{t("gallery.tags.loading")}</span>
+                        <Skeleton className="h-8 w-24" rounded="lg" />
+                        <Skeleton className="h-8 w-20" rounded="lg" />
+                      </span>
+                    ) : galleryTagsPhase === "paused"
+                      || galleryTagsPhase === "initial-error"
+                      || galleryTagsPhase === "initial-idle" ? (
+                      <GalleryActionButton
+                        type="button"
+                        onClick={() => void galleryTagsQuery.refetch()}
+                        preset="secondary"
+                        size="sm"
+                        loading={galleryTagsState.fetch === "fetching"}
+                        leadingIcon={<RotateCcw size={13} />}
+                        title={t("gallery.tags.loadFailed")}
+                      >
+                        {t("common.retry")}
+                      </GalleryActionButton>
+                    ) : (
+                      <span className={galleryFilterEmptyTextClassName}>{t("gallery.tags.noAvailable")}</span>
+                    )
                   )}
                 </div>
                 <div
@@ -1098,13 +1138,62 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                   {moderationError}
                 </div>
               ) : null}
-              {galleryRefreshError ? (
-                <div className="mx-auto mb-4 max-w-7xl rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-400/30 dark:bg-red-500/15 dark:text-red-100">
-                  {t("gallery.loadFailed")}
-                </div>
-              ) : null}
-
-              {visibleEntries.length ? (
+              <AsyncContent
+                state={galleryDisplayState}
+                refreshIntent="parameter-change"
+                loadingLabel={t("app.loading")}
+                skeleton={galleryGridHoldHeight ? (
+                  <div ref={gridRef} className="mx-auto max-w-7xl" style={galleryGridStageStyle} />
+                ) : (
+                  <div className="mx-auto max-w-7xl">
+                    <SkeletonCards count={8} className="grid-cols-2 sm:grid-cols-3 xl:grid-cols-4" />
+                  </div>
+                )}
+                initialError={(
+                  <div className="mx-auto max-w-3xl py-6">
+                    <AsyncErrorState
+                      title={t("gallery.loadFailed")}
+                      retryLabel={t("common.retry")}
+                      retryingLabel={t("app.loading")}
+                      retrying={galleryDisplayState.fetch === "fetching"}
+                      onRetry={() => void galleryQuery.refetch()}
+                    />
+                  </div>
+                )}
+                paused={(
+                  <div className="mx-auto max-w-3xl py-6">
+                    <AsyncPausedState
+                      title={t("app.requestPaused.title")}
+                      message={t("app.requestPaused.message")}
+                      retryLabel={t("common.retry")}
+                      onRetry={() => void galleryQuery.refetch()}
+                    />
+                  </div>
+                )}
+                inactive={null}
+                empty={(
+                  <div className={galleryEmptyStateClassName}>
+                    <ImageIcon
+                      size={30}
+                      className={`mb-4 ${isWorkspaceManage ? "text-indigo-300" : "text-indigo-500 dark:text-indigo-300"}`}
+                    />
+                    <div className={`text-2xl font-semibold ${isWorkspaceManage ? "text-white dark:text-white" : "text-slate-950 dark:text-white"}`}>
+                      {t("gallery.title")}
+                    </div>
+                    <div className="mt-3">{selectedTagIds.length ? t("gallery.tags.filterEmpty") : t("gallery.empty")}</div>
+                  </div>
+                )}
+                refreshFeedback={galleryViewState.error === "refresh" ? (
+                  <AsyncErrorState
+                    className="mx-auto mt-4 max-w-7xl rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-400/30 dark:bg-red-500/15 dark:text-red-100"
+                    title={t("gallery.loadFailed")}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("app.loading")}
+                    retrying={galleryViewState.fetch === "fetching"}
+                    onRetry={() => void galleryQuery.refetch()}
+                  />
+                ) : null}
+              >
                 <div className="relative mx-auto max-w-7xl" style={galleryGridStageStyle}>
                     <div
                       ref={gridRef}
@@ -1200,37 +1289,10 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                     })}
                     </div>
                 </div>
-              ) : galleryGridLoading && galleryGridHoldHeight ? (
-                <div
-                  ref={gridRef}
-                  className="mx-auto max-w-7xl"
-                  style={galleryGridStageStyle}
-                  aria-busy="true"
-                  aria-live="polite"
-                >
-                  <span className="sr-only">{t("app.loading")}</span>
-                </div>
-              ) : galleryGridLoading ? (
-                <div className={galleryLoadingStateClassName}>
-                  <Loader2 size={18} className="mr-2 animate-spin" />
-                  {t("app.loading")}
-                </div>
-              ) : (
-                <div className={galleryEmptyStateClassName}>
-                  <ImageIcon
-                    size={30}
-                    className={`mb-4 ${isWorkspaceManage ? "text-indigo-300" : "text-indigo-500 dark:text-indigo-300"}`}
-                  />
-                  <div className={`text-2xl font-semibold ${isWorkspaceManage ? "text-white dark:text-white" : "text-slate-950 dark:text-white"}`}>
-                    {t("gallery.title")}
-                  </div>
-                  <div className="mt-3">{selectedTagIds.length ? t("gallery.tags.filterEmpty") : t("gallery.empty")}</div>
-                </div>
-              )}
+              </AsyncContent>
 
             </section>
           </>
-        )}
           </div>
         </div>
       </main>
@@ -1241,6 +1303,8 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
         open={tagFilterDialogOpen}
         appearance={galleryActionAppearance}
         tags={galleryTags}
+        state={galleryTagsState}
+        onRetry={() => void galleryTagsQuery.refetch()}
         initialSelectedTagIds={selectedTagIds}
         title={t("gallery.tags.filter")}
         description={t("gallery.tags.filterDescription", { count: maxGalleryTagSelection })}
@@ -1258,6 +1322,8 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
         open={Boolean(entryTagEditorEntry)}
         appearance={galleryActionAppearance}
         tags={galleryTags}
+        state={galleryTagsState}
+        onRetry={() => void galleryTagsQuery.refetch()}
         initialSelectedTagIds={entryTagEditorEntry?.tags.map((tag) => tag.id) ?? []}
         title={t("gallery.tags.editEntry")}
         description={t("gallery.tags.editEntryDescriptionUnlimited")}
@@ -1309,11 +1375,64 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
           </div>
           <div className="grid min-h-0 flex-1 gap-0 overflow-hidden md:grid-cols-[minmax(0,1fr)_320px]">
             <div className="min-h-0 overflow-y-auto p-5">
-              {manageGalleryTagsQuery.isLoading ? (
-                <div className="flex min-h-40 items-center justify-center text-slate-400">
-                  <Loader2 size={22} className="animate-spin" />
-                </div>
-              ) : manageableGalleryTags.length ? (
+              <AsyncContent
+                state={manageGalleryTagsState}
+                refreshIntent="background"
+                loadingLabel={t("gallery.tags.loading")}
+                skeleton={(
+                  <div className="space-y-2">
+                    {[1, 2, 3, 4].map((item) => (
+                      <div key={item} className="grid gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700 sm:grid-cols-[minmax(0,1fr)_auto]">
+                        <div className="space-y-2">
+                          <Skeleton className="h-4 w-2/5" />
+                          <Skeleton className="h-3 w-3/4" />
+                        </div>
+                        <div className="flex gap-2">
+                          {[1, 2, 3].map((action) => <Skeleton key={action} className="h-8 w-8" rounded="lg" />)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                initialError={(
+                  <AsyncErrorState
+                    title={t("gallery.tags.loadFailed")}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("gallery.tags.loading")}
+                    retrying={manageGalleryTagsState.fetch === "fetching"}
+                    onRetry={() => void manageGalleryTagsQuery.refetch()}
+                  />
+                )}
+                paused={(
+                  <AsyncPausedState
+                    title={t("app.requestPaused.title")}
+                    message={t("app.requestPaused.message")}
+                    retryLabel={t("common.retry")}
+                    onRetry={() => void manageGalleryTagsQuery.refetch()}
+                  />
+                )}
+                inactive={null}
+                empty={(
+                  <div className="flex min-h-40 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400 dark:border-slate-700 dark:text-slate-500">
+                    {t("gallery.tags.empty")}
+                  </div>
+                )}
+                refreshFeedback={
+                  manageGalleryTagsState.error === "refresh" ? (
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                      <span>{t("gallery.tags.loadFailed")}</span>
+                      <GalleryActionButton
+                        preset="secondary"
+                        size="sm"
+                        className="shrink-0 text-xs"
+                        onClick={() => void manageGalleryTagsQuery.refetch()}
+                      >
+                        {t("common.retry")}
+                      </GalleryActionButton>
+                    </div>
+                  ) : null
+                }
+              >
                 <div className="space-y-2">
                   {manageableGalleryTags.map((tag) => {
                     const toggling = toggleGalleryTagMutation.isPending && toggleGalleryTagMutation.variables?.id === tag.id;
@@ -1386,11 +1505,7 @@ export function GalleryPage({ mode = "auto" }: GalleryPageProps = {}) {
                     );
                   })}
                 </div>
-              ) : (
-                <div className="flex min-h-40 items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400 dark:border-slate-700 dark:text-slate-500">
-                  {t("gallery.tags.empty")}
-                </div>
-              )}
+              </AsyncContent>
             </div>
             <form
               onSubmit={handleTagFormSubmit}

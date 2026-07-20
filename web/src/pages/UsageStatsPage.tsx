@@ -4,7 +4,6 @@ import {
   BarChart3,
   CheckCircle2,
   Image,
-  Loader2,
   MessageSquareText,
   RefreshCw,
   User,
@@ -14,6 +13,8 @@ import { useNavigate } from "react-router-dom";
 
 import { ClassicSelectField } from "../components/classicInputs";
 import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { SkeletonMetrics, SkeletonRows } from "../components/loading/Skeleton";
 import { TopNav } from "../components/TopNav";
 import {
   ClassicDateTimeRangeField,
@@ -25,6 +26,7 @@ import {
 } from "../components/WorkspaceDateTimeRangeField";
 import { WorkspaceSelectField } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import { asyncViewStateFromQuery } from "../lib/asyncViewState";
 import { formatDateTime } from "../lib/format";
 import { useI18n } from "../lib/preferences";
 import { useSessionState } from "../lib/session";
@@ -184,6 +186,15 @@ function UsageStatsDetailPage() {
     enabled: !appliedRangeInvalid,
     retry: false,
   });
+  const usageState = asyncViewStateFromQuery({
+    active: !appliedRangeInvalid,
+    data: usageQuery.data,
+    dataUpdatedAt: usageQuery.dataUpdatedAt,
+    isSuccess: usageQuery.isSuccess,
+    isError: usageQuery.isError,
+    fetchStatus: usageQuery.fetchStatus,
+    isEmpty: () => false,
+  });
 
   const logoutMutation = useMutation({
     mutationFn: api.destroySession,
@@ -213,6 +224,8 @@ function UsageStatsDetailPage() {
   });
   const isWorkspaceSubpage = activeScheme === "workspace";
   const PageActionButton = actionButtonComponentForAppearance(isWorkspaceSubpage ? "workspace" : "classic");
+  const usageErrorMessage =
+    usageQuery.error instanceof ApiError ? usageQuery.error.detail : t("usageStats.loadFailed");
   const refreshUsageStats = () => {
     if (
       range.start_date === appliedRange.start_date &&
@@ -332,73 +345,114 @@ function UsageStatsDetailPage() {
             ) : null}
           </section>
 
-          {usageQuery.isError ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-              {usageQuery.error instanceof ApiError ? usageQuery.error.detail : t("usageStats.loadFailed")}
-            </div>
-          ) : null}
-
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <MetricCard
-              label={t("usageStats.metric.total")}
-              value={summary?.attempt_count ?? 0}
-              detail={splitDetail}
-              icon={BarChart3}
-            />
-            <MetricCard
-              label={t("usageStats.metric.success")}
-              value={summary?.success_count ?? 0}
-              detail={t("usageStats.metric.successRate", { rate: successRate(summary) })}
-              icon={CheckCircle2}
-            />
-            <MetricCard
-              label={t("usageStats.metric.text")}
-              value={summary?.text_attempt_count ?? 0}
-              icon={MessageSquareText}
-            />
-            <MetricCard
-              label={t("usageStats.metric.image")}
-              value={summary?.image_attempt_count ?? 0}
-              icon={Image}
-            />
-            <MetricCard
-              label={t("usageStats.metric.avgLatency")}
-              value={`${averageLatencyMs(summary)} ms`}
-              icon={RefreshCw}
-            />
-          </div>
-
-          <section className={`${PANEL_CLASS} pf-governed-list-panel overflow-hidden`}>
-            <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-slate-950 dark:text-white">
-                  {t("usageStats.table.title")}
-                </h2>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  {t("usageStats.table.description", {
-                    start: usageQuery.data?.start_date ?? apiRange.start_date,
-                    end: usageQuery.data?.end_date ?? apiRange.end_date,
-                  })}
-                </p>
+          <AsyncContent
+            state={usageState}
+            refreshIntent="user-refresh"
+            loadingLabel={t("app.loading")}
+            skeleton={(
+              <div className="space-y-5">
+                <SkeletonMetrics count={5} className="sm:grid-cols-2 xl:grid-cols-5" />
+                <section className={`${PANEL_CLASS} overflow-hidden p-5`}>
+                  <SkeletonRows count={6} />
+                </section>
               </div>
-              {usageQuery.isFetching ? (
-                <span className="inline-flex items-center text-xs font-semibold text-slate-500 dark:text-slate-400">
-                  <Loader2 size={13} className="mr-1.5 animate-spin" />
-                  {t("app.loading")}
-                </span>
-              ) : null}
-            </div>
-            <div className="pf-gradient-divide">
-              {items.length ? (
-                items.map((item) => <UsageStatRow key={item.id} item={item} />)
-              ) : (
-                <div className="px-5 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
-                  <User size={22} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
-                  {t("usageStats.empty")}
+            )}
+            initialError={(
+              <AsyncErrorState
+                title={usageErrorMessage}
+                retryLabel={t("common.retry")}
+                retryingLabel={t("app.loading")}
+                retrying={usageState.fetch === "fetching"}
+                onRetry={() => void usageQuery.refetch()}
+              />
+            )}
+            paused={(
+              <AsyncPausedState
+                title={t("app.requestPaused.title")}
+                message={t("app.requestPaused.message")}
+                retryLabel={t("common.retry")}
+                onRetry={() => void usageQuery.refetch()}
+              />
+            )}
+            inactive={(
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
+                {t("statusPage.invalidRange")}
+              </div>
+            )}
+            empty={null}
+            refreshFeedback={
+              usageState.error === "refresh" ? (
+                <div className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                  <span>{usageErrorMessage}</span>
+                  <PageActionButton
+                    preset="secondary"
+                    size="sm"
+                    className="shrink-0 text-xs"
+                    onClick={() => void usageQuery.refetch()}
+                  >
+                    {t("common.retry")}
+                  </PageActionButton>
                 </div>
-              )}
+              ) : null
+            }
+            className="space-y-5"
+          >
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <MetricCard
+                label={t("usageStats.metric.total")}
+                value={summary?.attempt_count ?? 0}
+                detail={splitDetail}
+                icon={BarChart3}
+              />
+              <MetricCard
+                label={t("usageStats.metric.success")}
+                value={summary?.success_count ?? 0}
+                detail={t("usageStats.metric.successRate", { rate: successRate(summary) })}
+                icon={CheckCircle2}
+              />
+              <MetricCard
+                label={t("usageStats.metric.text")}
+                value={summary?.text_attempt_count ?? 0}
+                icon={MessageSquareText}
+              />
+              <MetricCard
+                label={t("usageStats.metric.image")}
+                value={summary?.image_attempt_count ?? 0}
+                icon={Image}
+              />
+              <MetricCard
+                label={t("usageStats.metric.avgLatency")}
+                value={`${averageLatencyMs(summary)} ms`}
+                icon={RefreshCw}
+              />
             </div>
-          </section>
+
+            <section className={`${PANEL_CLASS} pf-governed-list-panel overflow-hidden`}>
+              <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-950 dark:text-white">
+                    {t("usageStats.table.title")}
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {t("usageStats.table.description", {
+                      start: usageQuery.data?.start_date ?? apiRange.start_date,
+                      end: usageQuery.data?.end_date ?? apiRange.end_date,
+                    })}
+                  </p>
+                </div>
+              </div>
+              <div className="pf-gradient-divide">
+                {items.length ? (
+                  items.map((item) => <UsageStatRow key={item.id} item={item} />)
+                ) : (
+                  <div className="px-5 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+                    <User size={22} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+                    {t("usageStats.empty")}
+                  </div>
+                )}
+              </div>
+            </section>
+          </AsyncContent>
         </div>
           </div>
         </div>

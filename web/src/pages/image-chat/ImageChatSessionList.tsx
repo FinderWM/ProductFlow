@@ -7,6 +7,8 @@ import {
   transparentActionToneVars,
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../components/loading/AsyncContent";
+import { Skeleton } from "../../components/loading/Skeleton";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -17,12 +19,13 @@ import { SensitiveImageOverlay, sensitiveImageClassName } from "../../components
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/format";
 import { shouldMaskSensitiveImage } from "../../lib/sensitiveImages";
+import type { AsyncViewState } from "../../lib/asyncViewState";
 import type { ImageSessionSummary, SessionUser } from "../../lib/types";
 import type { ImageChatTranslate } from "./display";
 
 interface ImageChatSessionListProps {
   items: ImageSessionSummary[];
-  isLoading: boolean;
+  state: AsyncViewState;
   selectedSessionId: string | null;
   deletingSessionId: string | null;
   deletionEnabled: boolean;
@@ -33,12 +36,13 @@ interface ImageChatSessionListProps {
   maskSensitiveImages: boolean;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
+  onRetry: () => void;
   t: ImageChatTranslate;
 }
 
 export function ImageChatSessionList({
   items,
-  isLoading,
+  state,
   selectedSessionId,
   deletingSessionId,
   deletionEnabled,
@@ -49,6 +53,7 @@ export function ImageChatSessionList({
   maskSensitiveImages,
   onSelectSession,
   onDeleteSession,
+  onRetry,
   t,
 }: ImageChatSessionListProps) {
   const containerClassName =
@@ -58,26 +63,68 @@ export function ImageChatSessionList({
 
   return (
     <div className={containerClassName}>
-      {isLoading ? (
-        <div className="flex gap-3 overflow-x-auto lg:flex-col lg:gap-2 lg:overflow-x-visible">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className={`pf-image-chat-session-card flex shrink-0 items-center gap-3 rounded-2xl border border-slate-100 bg-white p-2.5 shadow-sm dark:border-slate-800/80 dark:bg-[#151f33] ${
-                variant === "desktop" ? "w-64 lg:w-auto" : "w-full"
-              }`}
-            >
-              <div className="pf-image-chat-session-thumb h-16 w-16 shrink-0 rounded-xl bg-slate-200 dark:bg-[#0a1020] animate-shimmer" />
-              <div className="flex-1 space-y-2">
-                <div className="h-4 w-3/4 rounded bg-slate-100 dark:bg-slate-800/60 animate-shimmer" />
-                <div className="h-3 w-1/2 rounded bg-slate-100 dark:bg-slate-800/60 animate-shimmer" />
-                <div className="h-3 w-1/3 rounded bg-slate-100 dark:bg-slate-800/60 animate-shimmer" />
+      <AsyncContent
+        state={state}
+        refreshIntent="background"
+        loadingLabel={t("app.loading")}
+        skeleton={(
+          <div className="flex gap-3 overflow-x-auto lg:flex-col lg:gap-2 lg:overflow-x-visible">
+            {[1, 2, 3].map((index) => (
+              <div
+                key={index}
+                className={`pf-image-chat-session-card flex shrink-0 items-center gap-3 rounded-2xl border border-slate-100 bg-white p-2.5 shadow-sm dark:border-slate-800/80 dark:bg-[#151f33] ${
+                  variant === "desktop" ? "w-64 lg:w-auto" : "w-full"
+                }`}
+              >
+                <Skeleton className="pf-image-chat-session-thumb h-16 w-16 shrink-0" rounded="lg" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-3 w-1/2" />
+                  <Skeleton className="h-3 w-1/3" />
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      ) : items.length ? (
-        items.map((item) => (
+            ))}
+          </div>
+        )}
+        inactive={(
+          <div className="flex gap-3 overflow-x-auto lg:flex-col lg:gap-2 lg:overflow-x-visible" aria-hidden="true">
+            {[1, 2, 3].map((index) => <Skeleton key={index} className="h-20 w-64 shrink-0 lg:w-full" rounded="lg" />)}
+          </div>
+        )}
+        initialError={(
+          <AsyncErrorState
+            title={t("chat.loadSessionsFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={state.fetch === "fetching"}
+            onRetry={onRetry}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={onRetry}
+          />
+        )}
+        empty={(
+          <div className="pf-image-chat-session-empty pf-workspace-card-soft pf-workspace-muted rounded-2xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t("chat.noSessions")}
+          </div>
+        )}
+        refreshFeedback={state.error === "refresh" ? (
+          <AsyncErrorState
+            className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+            title={t("chat.loadSessionsFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={state.fetch === "fetching"}
+            onRetry={onRetry}
+          />
+        ) : null}
+      >
+        {items.map((item) => (
           <ImageChatSessionCard
             key={item.id}
             item={item}
@@ -93,12 +140,8 @@ export function ImageChatSessionList({
             onDeleteSession={onDeleteSession}
             t={t}
           />
-        ))
-      ) : (
-        <div className="pf-image-chat-session-empty pf-workspace-card-soft pf-workspace-muted rounded-2xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          {t("chat.noSessions")}
-        </div>
-      )}
+        ))}
+      </AsyncContent>
     </div>
   );
 }

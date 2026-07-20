@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   ArrowRight,
@@ -8,7 +8,6 @@ import {
   Flower2,
   Image as ImageIcon,
   Leaf,
-  Loader2,
   MessageSquareText,
   Sparkles,
   Trees,
@@ -16,8 +15,15 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../components/loading/AsyncContent";
+import { Skeleton } from "../../components/loading/Skeleton";
 import { TopNav } from "../../components/TopNav";
 import { api, ApiError } from "../../lib/api";
+import {
+  asyncViewStateFromQuery,
+  combineAsyncViewStates,
+  type AsyncViewState,
+} from "../../lib/asyncViewState";
 import { formatDateTime, formatDateTimeSeconds } from "../../lib/format";
 import { parseImageSizeValue } from "../../lib/imageSizes";
 import type { TranslationKey } from "../../lib/i18n";
@@ -47,7 +53,6 @@ import { galleryEntrySizeLabel } from "../gallery/helpers";
 import { galleryAdminRemovedLabel } from "../gallery/moderation";
 import { inspirationKeyInfo, inspirationMainThumbnailUrl } from "../InspirationListPage.helpers";
 
-const WORKSPACE_MUTED_CARD_CLASS = "pf-workspace-card-soft rounded-lg";
 const WORKSPACE_LATEST_FETCH_SIZE = 24;
 const WORKSPACE_LATEST_VISIBLE_COUNT = 3;
 const GALLERY_STRIP_PAGE_SIZE = 6;
@@ -552,20 +557,255 @@ export function WorkspaceHandoffButton({
   );
 }
 
-export function WorkspaceLoadingState({ label }: { label: string }) {
+type WorkspaceSkeletonProfile = "latest" | "metrics" | "gallery" | "summary";
+
+function WorkspaceLatestRowsSkeleton() {
   return (
-    <div className={`${WORKSPACE_MUTED_CARD_CLASS} pf-workspace-muted flex min-h-48 items-center justify-center`}>
-      <Loader2 size={22} className="animate-spin" />
-      <span className="sr-only">{label}</span>
+    <div className="pf-workspace-latest-list">
+      {[1, 2, 3].map((item) => (
+        <div key={item} className="pf-workspace-latest-item pointer-events-none">
+          <Skeleton className="pf-workspace-latest-thumb" rounded="lg" />
+          <span className="pf-workspace-latest-copy space-y-2">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-1/2" />
+          </span>
+          <Skeleton className="h-7 w-7 shrink-0" rounded="lg" />
+        </div>
+      ))}
     </div>
   );
 }
 
-export function WorkspaceErrorState({ message }: { message: string }) {
+function WorkspaceMetricsSkeleton({ count = 3 }: { count?: number }) {
   return (
-    <div className="rounded-[22px] bg-red-500/10 px-4 py-3 text-sm font-medium text-red-700 dark:text-red-200">
-      {message}
+    <div className="pf-workspace-menu-summary-grid">
+      {Array.from({ length: count }, (_, index) => (
+        <div key={index} className="pf-workspace-menu-summary-card space-y-3">
+          <Skeleton className="h-3 w-2/3" />
+          <Skeleton className="h-8 w-20" />
+          <Skeleton className="h-3 w-4/5" />
+        </div>
+      ))}
     </div>
+  );
+}
+
+export function WorkspaceRegionSkeleton({
+  profile,
+  metricCount,
+}: {
+  profile: WorkspaceSkeletonProfile;
+  metricCount?: number;
+}) {
+  if (profile === "latest") {
+    return <WorkspaceLatestRowsSkeleton />;
+  }
+  if (profile === "metrics") {
+    return <WorkspaceMetricsSkeleton count={metricCount} />;
+  }
+  if (profile === "gallery") {
+    return (
+      <div className="pf-workspace-gallery-strip">
+        {[1, 2, 3].map((item) => (
+          <div key={item} className="pf-workspace-gallery-strip-card">
+            <Skeleton className="pf-workspace-gallery-strip-core min-h-44 w-full" rounded="lg" />
+            <Skeleton className="mx-1 mt-2 h-3 w-2/3" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-6">
+      <WorkspaceLatestRowsSkeleton />
+      <WorkspaceMetricsSkeleton count={metricCount} />
+    </div>
+  );
+}
+
+export function WorkspaceErrorState({
+  message,
+  retryLabel,
+  retryingLabel,
+  retrying = false,
+  onRetry,
+}: {
+  message: string;
+  retryLabel?: string;
+  retryingLabel?: string;
+  retrying?: boolean;
+  onRetry?: () => void;
+}) {
+  return (
+    <AsyncErrorState
+      className="rounded-lg border border-red-300/60 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-400/30 dark:text-red-100"
+      title={message}
+      retryLabel={retryLabel}
+      retryingLabel={retryingLabel}
+      retrying={retrying}
+      onRetry={onRetry}
+    />
+  );
+}
+
+function WorkspaceRefreshErrorState({ message, retryLabel, onRetry }: {
+  message: string;
+  retryLabel: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-300/60 bg-amber-400/10 px-3 py-2 text-xs font-medium text-amber-900 dark:border-amber-300/25 dark:text-amber-100">
+      <span>{message}</span>
+      <button type="button" className="shrink-0 font-semibold underline" onClick={onRetry}>{retryLabel}</button>
+    </div>
+  );
+}
+
+function WorkspaceAsyncRegion({
+  state,
+  loadingLabel,
+  errorMessage,
+  retryLabel,
+  pausedTitle,
+  pausedMessage,
+  profile,
+  metricCount,
+  empty,
+  children,
+  className,
+  onRetry,
+}: {
+  state: AsyncViewState;
+  loadingLabel: string;
+  errorMessage: string;
+  retryLabel: string;
+  pausedTitle: string;
+  pausedMessage: string;
+  profile: WorkspaceSkeletonProfile;
+  metricCount?: number;
+  empty: ReactNode;
+  children: ReactNode;
+  className?: string;
+  onRetry: () => void;
+}) {
+  const initialError = (
+    <WorkspaceErrorState
+      message={errorMessage}
+      retryLabel={retryLabel}
+      retryingLabel={loadingLabel}
+      retrying={state.fetch === "fetching"}
+      onRetry={onRetry}
+    />
+  );
+  return (
+    <AsyncContent
+      state={state}
+      refreshIntent="background"
+      loadingLabel={loadingLabel}
+      skeleton={<WorkspaceRegionSkeleton profile={profile} metricCount={metricCount} />}
+      initialError={initialError}
+      initialIdle={initialError}
+      paused={(
+        <AsyncPausedState
+          title={pausedTitle}
+          message={pausedMessage}
+          retryLabel={retryLabel}
+          onRetry={onRetry}
+        />
+      )}
+      inactive={<WorkspaceErrorState message={errorMessage} />}
+      empty={empty}
+      refreshFeedback={
+        state.error === "refresh"
+          ? <WorkspaceRefreshErrorState message={errorMessage} retryLabel={retryLabel} onRetry={onRetry} />
+          : null
+      }
+      className={className}
+    >
+      {children}
+    </AsyncContent>
+  );
+}
+
+function WorkspaceMetricCard({ label, value, detail }: { label: string; value: ReactNode; detail: string }) {
+  return (
+    <div className="pf-workspace-menu-summary-card">
+      <span className="pf-workspace-eyebrow">{label}</span>
+      <h3>{value}</h3>
+      <p className="pf-workspace-caption">{detail}</p>
+    </div>
+  );
+}
+
+function WorkspaceMetricCardRegion({
+  state,
+  label,
+  value,
+  detail,
+  loadingLabel,
+  errorMessage,
+  retryLabel,
+  pausedTitle,
+  pausedMessage,
+  onRetry,
+}: {
+  state: AsyncViewState;
+  label: string;
+  value: ReactNode;
+  detail: string;
+  loadingLabel: string;
+  errorMessage: string;
+  retryLabel: string;
+  pausedTitle: string;
+  pausedMessage: string;
+  onRetry: () => void;
+}) {
+  const content = <WorkspaceMetricCard label={label} value={value} detail={detail} />;
+  const initialError = (
+    <div className="pf-workspace-menu-summary-card">
+      <WorkspaceErrorState
+        message={errorMessage}
+        retryLabel={retryLabel}
+        retryingLabel={loadingLabel}
+        retrying={state.fetch === "fetching"}
+        onRetry={onRetry}
+      />
+    </div>
+  );
+  return (
+    <AsyncContent
+      state={state}
+      refreshIntent="background"
+      loadingLabel={loadingLabel}
+      skeleton={(
+        <div className="pf-workspace-menu-summary-card space-y-3">
+          <Skeleton className="h-3 w-2/3" />
+          <Skeleton className="h-8 w-20" />
+          <Skeleton className="h-3 w-4/5" />
+        </div>
+      )}
+      initialError={initialError}
+      initialIdle={initialError}
+      paused={(
+        <div className="pf-workspace-menu-summary-card">
+          <AsyncPausedState
+            title={pausedTitle}
+            message={pausedMessage}
+            retryLabel={retryLabel}
+            onRetry={onRetry}
+          />
+        </div>
+      )}
+      inactive={initialError}
+      empty={content}
+      refreshFeedback={
+        state.error === "refresh"
+          ? <WorkspaceRefreshErrorState message={errorMessage} retryLabel={retryLabel} onRetry={onRetry} />
+          : null
+      }
+    >
+      {content}
+    </AsyncContent>
   );
 }
 
@@ -725,6 +965,15 @@ function WorkspaceInspirationsContent() {
     enabled: Boolean(ownerUserId),
     staleTime: 60_000,
   });
+  const inspirationsState = asyncViewStateFromQuery({
+    active: Boolean(ownerUserId),
+    data: inspirationsQuery.data,
+    dataUpdatedAt: inspirationsQuery.dataUpdatedAt,
+    isSuccess: inspirationsQuery.isSuccess,
+    isError: inspirationsQuery.isError,
+    fetchStatus: inspirationsQuery.fetchStatus,
+    isEmpty: (data) => workspaceVisibleInspirations(data.items).length === 0,
+  });
   const inspirations = workspaceVisibleInspirations(inspirationsQuery.data?.items ?? []);
   const total = inspirationsQuery.data?.total ?? 0;
   const copyReadyCount = inspirations.filter(
@@ -732,19 +981,53 @@ function WorkspaceInspirationsContent() {
   ).length;
   const posterReadyCount = inspirations.filter((inspiration) => inspiration.workflow_state === "poster_ready").length;
   const artImageCandidates = workspaceInspirationArtImageCandidates(inspirations);
+  const inspirationMetrics = [
+    { label: t("inspirations.totalMetric"), value: total },
+    { label: t("inspirations.copyReadyMetric"), value: copyReadyCount },
+    { label: t("inspirations.posterReadyMetric"), value: posterReadyCount },
+  ];
+  const metricsContent = (
+    <div className="pf-workspace-menu-summary-grid">
+      {inspirationMetrics.map((item) => (
+        <div key={item.label} className="pf-workspace-menu-summary-card">
+          <span className="pf-workspace-eyebrow">{item.label}</span>
+          <h3>{item.value}</h3>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="pf-workspace-menu-landing">
         <section className="pf-workspace-menu-summary">
           <span className="pf-workspace-eyebrow">{t("inspirations.workspace.eyebrow")}</span>
 
-          <div className="pf-workspace-latest-list">
-            {inspirationsQuery.isLoading ? (
-              <WorkspaceLoadingState label={t("app.loading")} />
-            ) : inspirationsQuery.isError ? (
-              <WorkspaceErrorState message={t("inspirations.loadFailed")} />
-            ) : inspirations.length ? (
-              inspirations.map((inspiration) => {
+          <WorkspaceAsyncRegion
+            state={inspirationsState}
+            loadingLabel={t("app.loading")}
+            errorMessage={t("inspirations.loadFailed")}
+            retryLabel={t("common.retry")}
+            pausedTitle={t("app.requestPaused.title")}
+            pausedMessage={t("app.requestPaused.message")}
+            profile="summary"
+            metricCount={3}
+            onRetry={() => void inspirationsQuery.refetch()}
+            className="space-y-6"
+            empty={(
+              <>
+                <div className="pf-workspace-latest-list">
+                  <WorkspaceLatestItem
+                    title={t("inspirations.keyInfo.empty")}
+                    detail={t("inspirations.emptyDescription")}
+                    icon={Sparkles}
+                  />
+                </div>
+                {metricsContent}
+              </>
+            )}
+          >
+            <div className="pf-workspace-latest-list">
+              {inspirations.map((inspiration) => {
                 const keyInfo = inspirationKeyInfo(inspiration);
                 const detail =
                   keyInfo.kind === "text"
@@ -759,28 +1042,10 @@ function WorkspaceInspirationsContent() {
                     onOpen={() => navigate(`/inspirations/${inspiration.id}`)}
                   />
                 );
-              })
-            ) : (
-              <WorkspaceLatestItem
-                title={t("inspirations.keyInfo.empty")}
-                detail={t("inspirations.emptyDescription")}
-                icon={Sparkles}
-              />
-            )}
-          </div>
-
-          <div className="pf-workspace-menu-summary-grid">
-            {[
-              { label: t("inspirations.totalMetric"), value: total },
-              { label: t("inspirations.copyReadyMetric"), value: copyReadyCount },
-              { label: t("inspirations.posterReadyMetric"), value: posterReadyCount },
-            ].map((item) => (
-              <div key={item.label} className="pf-workspace-menu-summary-card">
-                <span className="pf-workspace-eyebrow">{item.label}</span>
-                <h3>{item.value}</h3>
-              </div>
-            ))}
-          </div>
+              })}
+            </div>
+            {metricsContent}
+          </WorkspaceAsyncRegion>
 
           <div className="pf-workspace-section-actions">
             <WorkspaceHandoffButton onClick={() => navigate("/inspirations/all")}>
@@ -827,23 +1092,46 @@ function WorkspaceImageChatContent({ subpage = false }: { subpage?: boolean } = 
     enabled: Boolean(ownerUserId),
     staleTime: 60_000,
   });
+  const sessionsState = asyncViewStateFromQuery({
+    active: Boolean(ownerUserId),
+    data: sessionsQuery.data,
+    dataUpdatedAt: sessionsQuery.dataUpdatedAt,
+    isSuccess: sessionsQuery.isSuccess,
+    isError: sessionsQuery.isError,
+    fetchStatus: sessionsQuery.fetchStatus,
+    isEmpty: (data) => workspaceVisibleImageSessions(data.items).length === 0,
+  });
   const sessions = workspaceVisibleImageSessions(sessionsQuery.data?.items ?? []);
   const artImageCandidates = workspaceImageSessionArtImageCandidates(sessions);
+  const sessionsErrorMessage =
+    sessionsQuery.error instanceof ApiError ? sessionsQuery.error.detail : t("chat.loadSessionsFailed");
 
   return (
     <div className={`pf-workspace-menu-landing${subpage ? " pf-workspace-menu-landing--image-chat" : ""}`}>
         <section className="pf-workspace-menu-summary">
           <span className="pf-workspace-eyebrow">{t("chat.workspace.eyebrow")}</span>
 
-          <div className="pf-workspace-latest-list">
-            {sessionsQuery.isLoading ? (
-              <WorkspaceLoadingState label={t("app.loading")} />
-            ) : sessionsQuery.isError ? (
-              <WorkspaceErrorState
-                message={sessionsQuery.error instanceof ApiError ? sessionsQuery.error.detail : t("chat.createFailed")}
-              />
-            ) : sessions.length ? (
-              sessions.map((imageSession) => (
+          <WorkspaceAsyncRegion
+            state={sessionsState}
+            loadingLabel={t("app.loading")}
+            errorMessage={sessionsErrorMessage}
+            retryLabel={t("common.retry")}
+            pausedTitle={t("app.requestPaused.title")}
+            pausedMessage={t("app.requestPaused.message")}
+            profile="latest"
+            onRetry={() => void sessionsQuery.refetch()}
+            empty={(
+              <div className="pf-workspace-latest-list">
+                <WorkspaceLatestItem
+                  title={t("chat.noSessions")}
+                  detail={t("chat.workspace.latestDescription")}
+                  icon={MessageSquareText}
+                />
+              </div>
+            )}
+          >
+            <div className="pf-workspace-latest-list">
+              {sessions.map((imageSession) => (
                 <WorkspaceLatestItem
                   key={imageSession.id}
                   title={imageSession.title}
@@ -860,11 +1148,9 @@ function WorkspaceImageChatContent({ subpage = false }: { subpage?: boolean } = 
                     )
                   }
                 />
-              ))
-            ) : (
-              <WorkspaceLatestItem title={t("chat.noSessions")} detail={t("chat.workspace.latestDescription")} icon={MessageSquareText} />
-            )}
-          </div>
+              ))}
+            </div>
+          </WorkspaceAsyncRegion>
 
           <div className="pf-workspace-section-actions">
             <WorkspaceHandoffButton onClick={() => navigate(workbenchPath)}>
@@ -957,17 +1243,33 @@ function WorkspaceGalleryContent() {
       }),
     staleTime: 60_000,
     gcTime: GALLERY_STRIP_QUERY_GC_MS,
+    placeholderData: keepPreviousData,
+  });
+  const galleryState = asyncViewStateFromQuery({
+    active: true,
+    data: galleryQuery.data,
+    dataUpdatedAt: galleryQuery.dataUpdatedAt,
+    isSuccess: galleryQuery.isSuccess,
+    isError: galleryQuery.isError,
+    fetchStatus: galleryQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
   });
   const entries = galleryQuery.data?.items ?? [];
   const artImageCandidates = workspaceGalleryArtImageCandidates(entries);
   const galleryTotal = galleryQuery.data?.total ?? entries.length;
   const nextGalleryOffset = galleryQuery.data?.next_offset ?? null;
   const hasNextGalleryPage = Boolean(galleryQuery.data?.has_more && nextGalleryOffset !== null);
-  const galleryLoopTargetOffset = nextWorkspaceGalleryLoopOffset({
-    galleryOffset,
-    hasNextGalleryPage,
-    nextGalleryOffset,
-  });
+  const galleryLoopTargetOffset = galleryQuery.isPlaceholderData
+    ? null
+    : nextWorkspaceGalleryLoopOffset({
+        galleryOffset,
+        hasNextGalleryPage,
+        nextGalleryOffset,
+      });
+  const galleryInteractionReady =
+    galleryState.content === "ready" && !galleryQuery.isPlaceholderData;
+  const galleryErrorMessage =
+    galleryQuery.error instanceof ApiError ? galleryQuery.error.detail : t("gallery.loadFailed");
 
   useEffect(() => {
     stripRef.current?.scrollTo({ left: 0 });
@@ -975,7 +1277,7 @@ function WorkspaceGalleryContent() {
 
   useEffect(() => {
     const root = stripRef.current;
-    if (!root || galleryQuery.isLoading || galleryQuery.isError || entries.length === 0) {
+    if (!root || !galleryInteractionReady || entries.length === 0) {
       setGalleryScrollMax(0);
       return;
     }
@@ -995,11 +1297,11 @@ function WorkspaceGalleryContent() {
       window.removeEventListener("resize", updateScrollMax);
       resizeObserver?.disconnect();
     };
-  }, [entries.length, galleryQuery.isError, galleryQuery.isLoading]);
+  }, [entries.length, galleryInteractionReady]);
 
   useEffect(() => {
     const root = stripRef.current;
-    if (!root || galleryQuery.isLoading || galleryQuery.isError || entries.length === 0) {
+    if (!root || !galleryInteractionReady || entries.length === 0) {
       setGalleryStripVisible(false);
       return;
     }
@@ -1017,7 +1319,7 @@ function WorkspaceGalleryContent() {
     );
     observer.observe(root);
     return () => observer.disconnect();
-  }, [entries.length, galleryQuery.isError, galleryQuery.isLoading]);
+  }, [entries.length, galleryInteractionReady]);
 
   useEffect(() => {
     if (galleryLoopTargetOffset === null || galleryLoopTargetOffset === galleryOffset) {
@@ -1055,14 +1357,14 @@ function WorkspaceGalleryContent() {
   }, [galleryLoopTargetOffset, galleryOffset, queryClient]);
 
   useEffect(() => {
-    if (!galleryQuery.isFetching && entries.length === 0 && galleryOffset > 0) {
+    if (galleryState.content === "empty" && !galleryQuery.isPlaceholderData && galleryOffset > 0) {
       setGalleryOffset(0);
     }
-  }, [entries.length, galleryOffset, galleryQuery.isFetching]);
+  }, [galleryOffset, galleryQuery.isPlaceholderData, galleryState.content]);
 
   useEffect(() => {
     const root = stripRef.current;
-    if (!root || !galleryStripVisible || galleryQuery.isLoading || galleryQuery.isError || entries.length === 0) {
+    if (!root || !galleryStripVisible || !galleryInteractionReady || entries.length === 0) {
       return;
     }
     let animationFrame = 0;
@@ -1119,8 +1421,7 @@ function WorkspaceGalleryContent() {
   }, [
     entries.length,
     galleryOffset,
-    galleryQuery.isError,
-    galleryQuery.isLoading,
+    galleryInteractionReady,
     galleryLoopTargetOffset,
     galleryScrollMax,
     galleryStripVisible,
@@ -1131,15 +1432,29 @@ function WorkspaceGalleryContent() {
         <section className="pf-workspace-menu-summary">
           <span className="pf-workspace-eyebrow">{t("gallery.workspace.eyebrow")}</span>
 
-          {galleryQuery.isLoading ? (
-            <div className="mt-6">
-              <WorkspaceLoadingState label={t("app.loading")} />
-            </div>
-          ) : galleryQuery.isError ? (
-            <div className="mt-6">
-              <WorkspaceErrorState message={t("gallery.loadFailed")} />
-            </div>
-          ) : entries.length ? (
+          <WorkspaceAsyncRegion
+            state={galleryState}
+            loadingLabel={t("app.loading")}
+            errorMessage={galleryErrorMessage}
+            retryLabel={t("common.retry")}
+            pausedTitle={t("app.requestPaused.title")}
+            pausedMessage={t("app.requestPaused.message")}
+            profile="gallery"
+            onRetry={() => void galleryQuery.refetch()}
+            className="mt-6"
+            empty={(
+              <>
+                <WorkspaceLatestItem
+                  title={t("gallery.empty")}
+                  detail={t("gallery.workspace.latestDescription")}
+                  icon={ImageIcon}
+                />
+                <span className="pf-workspace-muted mt-2 inline-flex text-xs">
+                  {t("gallery.count", { count: galleryTotal })}
+                </span>
+              </>
+            )}
+          >
             <div ref={stripRef} className="pf-workspace-gallery-strip">
               {entries.map((entry) => (
                 <GalleryStripItem
@@ -1150,13 +1465,10 @@ function WorkspaceGalleryContent() {
                 />
               ))}
             </div>
-          ) : (
-            <WorkspaceLatestItem title={t("gallery.empty")} detail={t("gallery.workspace.latestDescription")} icon={ImageIcon} />
-          )}
-
-          <span className="pf-workspace-muted mt-2 inline-flex text-xs">
-            {t("gallery.count", { count: galleryTotal })}
-          </span>
+            <span className="pf-workspace-muted mt-2 inline-flex text-xs">
+              {t("gallery.count", { count: galleryTotal })}
+            </span>
+          </WorkspaceAsyncRegion>
           <div className="pf-workspace-section-actions">
             <WorkspaceHandoffButton onClick={() => navigate("/gallery/manage")}>
               {t("gallery.workspace.more")}
@@ -1199,43 +1511,59 @@ function WorkspaceStatusContent() {
     queryFn: () => api.getGenerationConfigStatus({ start_date: today, end_date: today }),
     retry: false,
   });
+  const statusState = asyncViewStateFromQuery({
+    active: true,
+    data: statusQuery.data,
+    dataUpdatedAt: statusQuery.dataUpdatedAt,
+    isSuccess: statusQuery.isSuccess,
+    isError: statusQuery.isError,
+    fetchStatus: statusQuery.fetchStatus,
+    isEmpty: () => false,
+  });
   const summary = statusQuery.data;
   const todaySplit = t("statusPage.todaySplit", {
     text: summary?.today_text_attempt_count ?? 0,
     image: summary?.today_image_attempt_count ?? 0,
   });
+  const statusErrorMessage =
+    statusQuery.error instanceof ApiError ? statusQuery.error.detail : t("statusPage.loadFailed");
+  const statusMetrics = (
+    <div className="pf-workspace-menu-summary-grid">
+      {[
+        { label: t("statusPage.metric.todayTotal"), value: summary?.today_attempt_count ?? 0, detail: todaySplit },
+        { label: t("statusPage.metric.todayText"), value: summary?.today_text_attempt_count ?? 0, detail: t("statusPage.purpose.text") },
+        { label: t("statusPage.metric.todayImage"), value: summary?.today_image_attempt_count ?? 0, detail: t("statusPage.purpose.image") },
+        { label: t("settings.generation.runningConfigs"), value: summary?.running_count ?? 0, detail: t("settings.generation.frozenConfigs") + ` ${summary?.frozen_count ?? 0}` },
+      ].map((item) => (
+        <div key={item.label} className="pf-workspace-menu-summary-card">
+          <span className="pf-workspace-eyebrow">{item.label}</span>
+          <h3>{item.value}</h3>
+          <p className="pf-workspace-caption">{item.detail}</p>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="pf-workspace-menu-landing">
         <section className="pf-workspace-menu-summary">
           <span className="pf-workspace-eyebrow">{t("statusPage.workspace.eyebrow")}</span>
 
-          {statusQuery.isLoading ? (
-            <div className="mt-6">
-              <WorkspaceLoadingState label={t("app.loading")} />
-            </div>
-          ) : statusQuery.isError ? (
-            <div className="mt-6">
-              <WorkspaceErrorState
-                message={statusQuery.error instanceof ApiError ? statusQuery.error.detail : t("statusPage.loadFailed")}
-              />
-            </div>
-          ) : (
-            <div className="pf-workspace-menu-summary-grid">
-              {[
-                { label: t("statusPage.metric.todayTotal"), value: summary?.today_attempt_count ?? 0, detail: todaySplit },
-                { label: t("statusPage.metric.todayText"), value: summary?.today_text_attempt_count ?? 0, detail: t("statusPage.purpose.text") },
-                { label: t("statusPage.metric.todayImage"), value: summary?.today_image_attempt_count ?? 0, detail: t("statusPage.purpose.image") },
-                { label: t("settings.generation.runningConfigs"), value: summary?.running_count ?? 0, detail: t("settings.generation.frozenConfigs") + ` ${summary?.frozen_count ?? 0}` },
-              ].map((item) => (
-                <div key={item.label} className="pf-workspace-menu-summary-card">
-                  <span className="pf-workspace-eyebrow">{item.label}</span>
-                  <h3>{item.value}</h3>
-                  <p className="pf-workspace-caption">{item.detail}</p>
-                </div>
-              ))}
-            </div>
-          )}
+          <WorkspaceAsyncRegion
+            state={statusState}
+            loadingLabel={t("app.loading")}
+            errorMessage={statusErrorMessage}
+            retryLabel={t("common.retry")}
+            pausedTitle={t("app.requestPaused.title")}
+            pausedMessage={t("app.requestPaused.message")}
+            profile="metrics"
+            metricCount={4}
+            onRetry={() => void statusQuery.refetch()}
+            className="mt-6"
+            empty={statusMetrics}
+          >
+            {statusMetrics}
+          </WorkspaceAsyncRegion>
 
           <div className="pf-workspace-section-actions">
             <WorkspaceHandoffButton onClick={() => navigate("/status/detail")}>
@@ -1273,6 +1601,15 @@ export function WorkspaceUsageStatsContent() {
     queryFn: () => api.getUsageStats(today),
     retry: false,
   });
+  const usageState = asyncViewStateFromQuery({
+    active: true,
+    data: usageQuery.data,
+    dataUpdatedAt: usageQuery.dataUpdatedAt,
+    isSuccess: usageQuery.isSuccess,
+    isError: usageQuery.isError,
+    fetchStatus: usageQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
   const summary = usageQuery.data?.summary;
   const items = (usageQuery.data?.items ?? []).slice(0, 3);
   const splitDetail = t("usageStats.metric.split", {
@@ -1304,21 +1641,51 @@ export function WorkspaceUsageStatsContent() {
     { label: t("usageStats.metric.text"), value: summary?.text_attempt_count ?? 0, detail: scopeDetail },
     { label: t("usageStats.metric.image"), value: summary?.image_attempt_count ?? 0, detail: riskDetail },
   ];
+  const usageErrorMessage =
+    usageQuery.error instanceof ApiError ? usageQuery.error.detail : t("usageStats.loadFailed");
+  const usageMetricsContent = (
+    <div className="pf-workspace-menu-summary-grid">
+      {metrics.map((item) => (
+        <div key={item.label} className="pf-workspace-menu-summary-card">
+          <span className="pf-workspace-eyebrow">{item.label}</span>
+          <h3>{item.value}</h3>
+          <p className="pf-workspace-caption">{item.detail}</p>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="pf-workspace-menu-landing">
       <section className="pf-workspace-menu-summary">
         <span className="pf-workspace-eyebrow">{t("usageStats.workspace.eyebrow")}</span>
 
-        <div className="pf-workspace-latest-list">
-          {usageQuery.isLoading ? (
-            <WorkspaceLoadingState label={t("app.loading")} />
-          ) : usageQuery.isError ? (
-            <WorkspaceErrorState
-              message={usageQuery.error instanceof ApiError ? usageQuery.error.detail : t("usageStats.loadFailed")}
-            />
-          ) : items.length ? (
-            items.map((item) => {
+        <WorkspaceAsyncRegion
+          state={usageState}
+          loadingLabel={t("app.loading")}
+          errorMessage={usageErrorMessage}
+          retryLabel={t("common.retry")}
+          pausedTitle={t("app.requestPaused.title")}
+          pausedMessage={t("app.requestPaused.message")}
+          profile="summary"
+          metricCount={4}
+          onRetry={() => void usageQuery.refetch()}
+          className="space-y-6"
+          empty={(
+            <>
+              <div className="pf-workspace-latest-list">
+                <WorkspaceLatestItem
+                  title={t("usageStats.empty")}
+                  detail={`${lastSuccessDetail} / ${lastFailureDetail}`}
+                  icon={Sparkles}
+                />
+              </div>
+              {usageMetricsContent}
+            </>
+          )}
+        >
+          <div className="pf-workspace-latest-list">
+            {items.map((item) => {
               const rate = item.attempt_count > 0
                 ? `${Math.round((item.success_count / item.attempt_count) * 100)}%`
                 : "0%";
@@ -1332,25 +1699,10 @@ export function WorkspaceUsageStatsContent() {
                   icon={item.purpose === "text" ? MessageSquareText : ImageIcon}
                 />
               );
-            })
-          ) : (
-            <WorkspaceLatestItem
-              title={t("usageStats.empty")}
-              detail={`${lastSuccessDetail} / ${lastFailureDetail}`}
-              icon={Sparkles}
-            />
-          )}
-        </div>
-
-        <div className="pf-workspace-menu-summary-grid">
-          {metrics.map((item) => (
-            <div key={item.label} className="pf-workspace-menu-summary-card">
-              <span className="pf-workspace-eyebrow">{item.label}</span>
-              <h3>{item.value}</h3>
-              <p className="pf-workspace-caption">{item.detail}</p>
-            </div>
-          ))}
-        </div>
+            })}
+          </div>
+          {usageMetricsContent}
+        </WorkspaceAsyncRegion>
 
         <div className="pf-workspace-section-actions">
           <WorkspaceHandoffButton onClick={() => navigate("/usage-stats/detail")}>
@@ -1374,13 +1726,34 @@ function WorkspaceResourceLibraryContent() {
     queryKey: ["resource-library-assets", "all"],
     queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
   });
+  const groupsState = asyncViewStateFromQuery({
+    active: true,
+    data: groupsQuery.data,
+    dataUpdatedAt: groupsQuery.dataUpdatedAt,
+    isSuccess: groupsQuery.isSuccess,
+    isError: groupsQuery.isError,
+    fetchStatus: groupsQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const assetsState = asyncViewStateFromQuery({
+    active: true,
+    data: assetsQuery.data,
+    dataUpdatedAt: assetsQuery.dataUpdatedAt,
+    isSuccess: assetsQuery.isSuccess,
+    isError: assetsQuery.isError,
+    fetchStatus: assetsQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const groupMetricState = combineAsyncViewStates({
+    active: true,
+    critical: [groupsState, assetsState],
+    isEmpty: false,
+  });
 
   const groups = groupsQuery.data?.items ?? EMPTY_RESOURCE_LIBRARY_GROUPS;
   const assets = assetsQuery.data?.items ?? EMPTY_RESOURCE_LIBRARY_ASSETS;
   const latestAssets = assets.slice(0, 3);
   const artImageCandidates = workspaceResourceLibraryArtImageCandidates(latestAssets);
-  const loading = groupsQuery.isLoading || assetsQuery.isLoading;
-  const failed = groupsQuery.isError || assetsQuery.isError;
 
   const groupSummaryDetail = groups.length
     ? groups
@@ -1402,13 +1775,27 @@ function WorkspaceResourceLibraryContent() {
       <section className="pf-workspace-menu-summary">
         <span className="pf-workspace-eyebrow">{t("resourceLibrary.latestResources")}</span>
 
-        <div className="pf-workspace-latest-list">
-          {failed ? (
-            <WorkspaceErrorState message={t("resourceLibrary.loadFailed")} />
-          ) : loading ? (
-            <WorkspaceLoadingState label={t("resourceLibrary.loading")} />
-          ) : latestAssets.length ? (
-            latestAssets.map((asset) => (
+        <WorkspaceAsyncRegion
+          state={assetsState}
+          loadingLabel={t("resourceLibrary.loading")}
+          errorMessage={t("resourceLibrary.loadFailed")}
+          retryLabel={t("common.retry")}
+          pausedTitle={t("app.requestPaused.title")}
+          pausedMessage={t("app.requestPaused.message")}
+          profile="latest"
+          onRetry={() => void assetsQuery.refetch()}
+          empty={(
+            <div className="pf-workspace-latest-list">
+              <WorkspaceLatestItem
+                title={t("resourceLibrary.empty")}
+                detail={t("resourceLibrary.landingSubtitle")}
+                icon={Sparkles}
+              />
+            </div>
+          )}
+        >
+          <div className="pf-workspace-latest-list">
+            {latestAssets.map((asset) => (
               <WorkspaceLatestItem
                 key={asset.id}
                 title={asset.original_filename}
@@ -1416,31 +1803,35 @@ function WorkspaceResourceLibraryContent() {
                 thumbnailUrl={asset.thumbnail_url || asset.preview_url}
                 onOpen={() => navigate("/resource-library/manage")}
               />
-            ))
-          ) : (
-            <WorkspaceLatestItem
-              title={t("resourceLibrary.empty")}
-              detail={t("resourceLibrary.landingSubtitle")}
-              icon={Sparkles}
-            />
-          )}
-        </div>
+            ))}
+          </div>
+        </WorkspaceAsyncRegion>
 
         <div className="pf-workspace-menu-summary-grid">
-          {[
-            { label: t("resourceLibrary.groupSummary"), value: groups.length, detail: groupSummaryDetail },
-            {
-              label: t("resourceLibrary.sourceOverview"),
-              value: assets.length,
-              detail: sourceSummaryDetail || t("resourceLibrary.empty"),
-            },
-          ].map((item) => (
-            <div key={item.label} className="pf-workspace-menu-summary-card">
-              <span className="pf-workspace-eyebrow">{item.label}</span>
-              <h3>{item.value}</h3>
-              <p className="pf-workspace-caption">{item.detail}</p>
-            </div>
-          ))}
+          <WorkspaceMetricCardRegion
+            state={groupMetricState}
+            label={t("resourceLibrary.groupSummary")}
+            value={groups.length}
+            detail={groupSummaryDetail}
+            loadingLabel={t("resourceLibrary.loading")}
+            errorMessage={t("resourceLibrary.loadFailed")}
+            retryLabel={t("common.retry")}
+            pausedTitle={t("app.requestPaused.title")}
+            pausedMessage={t("app.requestPaused.message")}
+            onRetry={() => void Promise.all([groupsQuery.refetch(), assetsQuery.refetch()])}
+          />
+          <WorkspaceMetricCardRegion
+            state={assetsState}
+            label={t("resourceLibrary.sourceOverview")}
+            value={assets.length}
+            detail={sourceSummaryDetail || t("resourceLibrary.empty")}
+            loadingLabel={t("resourceLibrary.loading")}
+            errorMessage={t("resourceLibrary.loadFailed")}
+            retryLabel={t("common.retry")}
+            pausedTitle={t("app.requestPaused.title")}
+            pausedMessage={t("app.requestPaused.message")}
+            onRetry={() => void assetsQuery.refetch()}
+          />
         </div>
 
         <div className="pf-workspace-section-actions">

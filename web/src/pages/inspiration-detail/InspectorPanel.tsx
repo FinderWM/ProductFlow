@@ -61,6 +61,8 @@ import { ImageToolControls } from "../../components/ImageToolControls";
 import { MarkdownEditor } from "../../components/MarkdownEditor";
 import { MediaPreviewTrigger } from "../../components/MediaPreviewTrigger";
 import { ModalShell } from "../../components/ModalShell";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../../components/loading/AsyncContent";
+import { Skeleton } from "../../components/loading/Skeleton";
 import { ParameterHelpButton } from "../../components/ParameterHelp";
 import { PromptPreviewDialog, type PromptPreview } from "../../components/PromptPreviewDialog";
 import {
@@ -70,6 +72,7 @@ import {
   WorkspaceTextarea,
 } from "../../components/workspaceInputs";
 import { api, ApiError } from "../../lib/api";
+import { asyncViewStateFromQuery } from "../../lib/asyncViewState";
 import { exportDeckAsPptx } from "../../lib/deckPptxExport";
 import { sanitizeFilenamePart, toImageUrl, type DownloadableImage } from "../../lib/image-downloads";
 import {
@@ -1924,6 +1927,15 @@ function DeckGenerationInspector({
     queryKey: ["workflow-deck-sources", inspiration.id, node.id, draft.deckIncludeTransitiveInputs],
     queryFn: () => api.getWorkflowDeckSources(inspiration.id, node.id, draft.deckIncludeTransitiveInputs),
   });
+  const sourcesViewState = asyncViewStateFromQuery({
+    active: true,
+    data: sourcesQuery.data,
+    dataUpdatedAt: sourcesQuery.dataUpdatedAt,
+    isSuccess: sourcesQuery.isSuccess,
+    isError: sourcesQuery.isError,
+    fetchStatus: sourcesQuery.fetchStatus,
+    isEmpty: (data) => data.available_sources.length === 0 && data.unavailable_sources.length === 0,
+  });
   const deckId = deckIdFromNode(node);
   const deckQuery = useQuery({
     queryKey: ["deck", deckId],
@@ -2467,70 +2479,112 @@ function DeckGenerationInspector({
             {t("detail.deck.refreshSources")}
           </ActionButton>
         </div>
-        {sourcesQuery.isLoading ? (
-          <div className="space-y-2">
-            <div className="h-8 animate-pulse rounded-lg pf-surface-soft dark:bg-[color:var(--pf-deep)]" />
-            <div className="h-8 animate-pulse rounded-lg pf-surface-soft dark:bg-[color:var(--pf-deep)]" />
-          </div>
-        ) : availableSources.length ? (
-          <div className="space-y-3">
-            <DeckSourceSection
-              title={t("detail.deck.primarySources")}
-              emptyLabel={t("detail.deck.noPrimarySources")}
-              sources={sourcePartitions.primarySources}
-              orderedSourceIds={availableSources.map((source) => source.source_item_id)}
-              actionBusy={actionBusy}
-              onPreviewImage={onPreviewImage}
-              onToggleSelection={setDeckSourceSelection}
-              onMoveSource={moveDeckSource}
-              t={t}
-            />
-            <DeckSourceSection
-              title={t("detail.deck.alternateSources")}
-              emptyLabel={t("detail.deck.noAlternateSources")}
-              sources={sourcePartitions.alternateSources}
-              orderedSourceIds={availableSources.map((source) => source.source_item_id)}
-              actionBusy={actionBusy}
-              onPreviewImage={onPreviewImage}
-              onToggleSelection={setDeckSourceSelection}
-              onMoveSource={moveDeckSource}
-              t={t}
-            />
-          </div>
-        ) : (
-          <div className="rounded-lg border border-dashed pf-hairline-strong px-3 py-5 text-center text-xs pf-ink-muted dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)]">
-            {t("detail.deck.noSources")}
-          </div>
-        )}
-        {unavailableSources.length ? (
-          <div className="mt-3 space-y-1.5">
-            <div className="text-[11px] font-medium text-amber-700 dark:text-amber-200">
-              {t("detail.deck.unavailableSources", { count: unavailableSources.length })}
+        <AsyncContent
+          state={sourcesViewState}
+          refreshIntent="background"
+          loadingLabel={t("app.loading")}
+          skeleton={(
+            <div className="space-y-2">
+              <Skeleton className="h-8 w-full" rounded="lg" />
+              <Skeleton className="h-8 w-full" rounded="lg" />
             </div>
-            {unavailableSources.map((source) => (
-              <div
-                key={source.source_item_id}
-                className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-semibold">{source.workflow_node_title}</span>
-                  {source.kind ? (
-                    <span className="shrink-0 rounded-full border border-amber-200 bg-[rgba(255,255,255,0.8)] px-2 py-0.5 text-[10px] text-amber-700 dark:border-amber-300/20 dark:bg-[color:var(--pf-deep)] dark:text-amber-100">
-                      {deckSourceKindLabel(source.kind, t)}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-1">{deckUnavailableReasonLabel(source.reason, t)}</div>
-                {source.summary ? <div className="mt-1 opacity-80">{source.summary}</div> : null}
+          )}
+          initialError={(
+            <AsyncErrorState
+              title={t("detail.deck.sourcesLoadFailed")}
+              retryLabel={t("common.retry")}
+              retryingLabel={t("app.loading")}
+              retrying={sourcesViewState.fetch === "fetching"}
+              onRetry={() => void sourcesQuery.refetch()}
+            />
+          )}
+          paused={(
+            <AsyncPausedState
+              title={t("app.requestPaused.title")}
+              message={t("app.requestPaused.message")}
+              retryLabel={t("common.retry")}
+              onRetry={() => void sourcesQuery.refetch()}
+            />
+          )}
+          inactive={null}
+          empty={(
+            <div className="rounded-lg border border-dashed pf-hairline-strong px-3 py-5 text-center text-xs pf-ink-muted dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)]">
+              {t("detail.deck.noSources")}
+            </div>
+          )}
+          refreshFeedback={sourcesViewState.error === "refresh" ? (
+            <AsyncErrorState
+              className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+              title={t("detail.deck.sourcesLoadFailed")}
+              retryLabel={t("common.retry")}
+              retryingLabel={t("app.loading")}
+              retrying={sourcesViewState.fetch === "fetching"}
+              onRetry={() => void sourcesQuery.refetch()}
+            />
+          ) : null}
+        >
+          <>
+            {availableSources.length ? (
+              <div className="space-y-3">
+                <DeckSourceSection
+                  title={t("detail.deck.primarySources")}
+                  emptyLabel={t("detail.deck.noPrimarySources")}
+                  sources={sourcePartitions.primarySources}
+                  orderedSourceIds={availableSources.map((source) => source.source_item_id)}
+                  actionBusy={actionBusy}
+                  onPreviewImage={onPreviewImage}
+                  onToggleSelection={setDeckSourceSelection}
+                  onMoveSource={moveDeckSource}
+                  t={t}
+                />
+                <DeckSourceSection
+                  title={t("detail.deck.alternateSources")}
+                  emptyLabel={t("detail.deck.noAlternateSources")}
+                  sources={sourcePartitions.alternateSources}
+                  orderedSourceIds={availableSources.map((source) => source.source_item_id)}
+                  actionBusy={actionBusy}
+                  onPreviewImage={onPreviewImage}
+                  onToggleSelection={setDeckSourceSelection}
+                  onMoveSource={moveDeckSource}
+                  t={t}
+                />
               </div>
-            ))}
-          </div>
-        ) : null}
-        {sourcesQuery.data?.source_stale ? (
-          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
-            {t("detail.deck.sourceStale")}
-          </div>
-        ) : null}
+            ) : (
+              <div className="rounded-lg border border-dashed pf-hairline-strong px-3 py-5 text-center text-xs pf-ink-muted dark:border-[color:var(--pf-border)] dark:text-[color:var(--pf-muted)]">
+                {t("detail.deck.noSources")}
+              </div>
+            )}
+            {unavailableSources.length ? (
+              <div className="mt-3 space-y-1.5">
+                <div className="text-[11px] font-medium text-amber-700 dark:text-amber-200">
+                  {t("detail.deck.unavailableSources", { count: unavailableSources.length })}
+                </div>
+                {unavailableSources.map((source) => (
+                  <div
+                    key={source.source_item_id}
+                    className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-semibold">{source.workflow_node_title}</span>
+                      {source.kind ? (
+                        <span className="shrink-0 rounded-full border border-amber-200 bg-[rgba(255,255,255,0.8)] px-2 py-0.5 text-[10px] text-amber-700 dark:border-amber-300/20 dark:bg-[color:var(--pf-deep)] dark:text-amber-100">
+                          {deckSourceKindLabel(source.kind, t)}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-1">{deckUnavailableReasonLabel(source.reason, t)}</div>
+                    {source.summary ? <div className="mt-1 opacity-80">{source.summary}</div> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {sourcesQuery.data?.source_stale ? (
+              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                {t("detail.deck.sourceStale")}
+              </div>
+            ) : null}
+          </>
+        </AsyncContent>
       </div>
       <div className="grid gap-2 sm:grid-cols-3">
         <ActionButton

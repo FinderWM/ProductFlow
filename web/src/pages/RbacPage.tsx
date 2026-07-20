@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   KeyRound,
-  Loader2,
   Plus,
   Power,
   RefreshCcw,
@@ -22,10 +21,18 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { LayoutActionSurfaceButton } from "../components/LayoutActionSurfaceButton";
 import { LayoutSwitchTabs, type LayoutSwitchTabItem } from "../components/LayoutSwitchTabs";
 import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { SkeletonRows } from "../components/loading/Skeleton";
 import { ModalShell } from "../components/ModalShell";
 import { TopNav } from "../components/TopNav";
 import { WorkspaceOptionToggle, WorkspaceSelectField, WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import {
+  asyncViewPhase,
+  asyncViewStateFromQuery,
+  combineAsyncViewStates,
+  type AsyncViewState,
+} from "../lib/asyncViewState";
 import { formatDateTime } from "../lib/format";
 import { useI18n } from "../lib/preferences";
 import { useUiLayoutScheme } from "../lib/uiLayoutSchemePreference";
@@ -262,12 +269,80 @@ export function RbacPage() {
     queryFn: () => api.getUserGenerationResourceGroupGrants(resourceGroupGrantUser!.id),
     enabled: shouldLoadResourceGroupGrantData,
   });
+  const usersState = asyncViewStateFromQuery({
+    active: true,
+    data: usersQuery.data,
+    dataUpdatedAt: usersQuery.dataUpdatedAt,
+    isSuccess: usersQuery.isSuccess,
+    isError: usersQuery.isError,
+    fetchStatus: usersQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const rolesState = asyncViewStateFromQuery({
+    active: true,
+    data: rolesQuery.data,
+    dataUpdatedAt: rolesQuery.dataUpdatedAt,
+    isSuccess: rolesQuery.isSuccess,
+    isError: rolesQuery.isError,
+    fetchStatus: rolesQuery.fetchStatus,
+    isEmpty: (data) => data.length === 0,
+  });
+  const rolesPhase = asyncViewPhase(rolesState);
+  const permissionCatalogState = asyncViewStateFromQuery({
+    active: Boolean(selectedPermissionRole?.id),
+    data: permissionCatalogQuery.data,
+    dataUpdatedAt: permissionCatalogQuery.dataUpdatedAt,
+    isSuccess: permissionCatalogQuery.isSuccess,
+    isError: permissionCatalogQuery.isError,
+    fetchStatus: permissionCatalogQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const rolePermissionsState = asyncViewStateFromQuery({
+    active: Boolean(selectedPermissionRole?.id),
+    data: rolePermissionsQuery.data,
+    dataUpdatedAt: rolePermissionsQuery.dataUpdatedAt,
+    isSuccess: rolePermissionsQuery.isSuccess,
+    isError: rolePermissionsQuery.isError,
+    fetchStatus: rolePermissionsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const permissionsState = combineAsyncViewStates({
+    active: Boolean(selectedPermissionRole?.id),
+    critical: [permissionCatalogState, rolePermissionsState],
+    isEmpty: false,
+  });
+  const generationResourceGroupsState = asyncViewStateFromQuery({
+    active: shouldLoadResourceGroupGrantData,
+    data: generationResourceGroupsQuery.data,
+    dataUpdatedAt: generationResourceGroupsQuery.dataUpdatedAt,
+    isSuccess: generationResourceGroupsQuery.isSuccess,
+    isError: generationResourceGroupsQuery.isError,
+    fetchStatus: generationResourceGroupsQuery.fetchStatus,
+    isEmpty: (data) => data.filter((group) => !group.archived_at).length === 0,
+  });
+  const resourceGroupGrantsQueryState = asyncViewStateFromQuery({
+    active: shouldLoadResourceGroupGrantData,
+    data: resourceGroupGrantsQuery.data,
+    dataUpdatedAt: resourceGroupGrantsQuery.dataUpdatedAt,
+    isSuccess: resourceGroupGrantsQuery.isSuccess,
+    isError: resourceGroupGrantsQuery.isError,
+    fetchStatus: resourceGroupGrantsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const resourceGroupGrantsState = combineAsyncViewStates({
+    active: shouldLoadResourceGroupGrantData,
+    critical: [generationResourceGroupsState, resourceGroupGrantsQueryState],
+    isEmpty: generationResourceGroups.length === 0,
+  });
 
   const refreshCurrentUserList = async () => {
     await queryClient.invalidateQueries({ queryKey: currentUserListQueryKey.current, exact: true });
   };
 
   useEffect(() => {
+    if (rolesPhase !== "ready" && rolesPhase !== "empty") {
+      return;
+    }
     if (!filteredRoles.length) {
       if (selectedPermissionRoleId) {
         setSelectedPermissionRoleId("");
@@ -285,7 +360,7 @@ export function RbacPage() {
     ) {
       setSelectedPermissionRoleId(filteredRoles[0].id);
     }
-  }, [filteredRoles, selectedPermissionRoleId]);
+  }, [filteredRoles, rolesPhase, selectedPermissionRoleId]);
 
   useEffect(() => {
     if (usersQuery.data && userPage > userTotalPages) {
@@ -469,11 +544,7 @@ export function RbacPage() {
     setResourceGroupGrantDraft(user.is_admin ? [] : rbacUserResourceGroupIds(user));
   };
 
-  const loading = usersQuery.isLoading || rolesQuery.isLoading;
-  const permissionsLoading = permissionCatalogQuery.isLoading || rolePermissionsQuery.isLoading;
-  const resourceGroupGrantsLoading =
-    shouldLoadResourceGroupGrantData &&
-    (generationResourceGroupsQuery.isLoading || resourceGroupGrantsQuery.isLoading);
+  const rolesResolved = rolesPhase === "ready" || rolesPhase === "empty";
   const userFiltersActive = Boolean(userSearch || userRoleFilter);
   const pendingUserActionBusy = resetPasswordMutation.isPending || updateUserMutation.isPending;
   const pendingUserActionTitle = pendingUserAction
@@ -499,6 +570,14 @@ export function RbacPage() {
     : "";
   const emptyPermissionRoleMessage = roles.length ? t("rbac.noMatchingRoles") : t("rbac.noRoles");
   const resourceGroupGrantDialogOpen = Boolean(resourceGroupGrantUser);
+
+  function retryPermissions() {
+    void Promise.all([permissionCatalogQuery.refetch(), rolePermissionsQuery.refetch()]);
+  }
+
+  function retryResourceGroupGrants() {
+    void Promise.all([generationResourceGroupsQuery.refetch(), resourceGroupGrantsQuery.refetch()]);
+  }
 
   return (
     <div className="pf-app pf-settings-workspace">
@@ -539,18 +618,7 @@ export function RbacPage() {
           tabClassName="flex-1"
         />
 
-        {loading ? (
-          <div className={`${RBAC_PANEL_CLASS} flex items-center gap-2 py-8 text-sm text-slate-500 dark:text-slate-400`}>
-            <Loader2 size={16} className="animate-spin" />
-            {t("app.loading")}
-          </div>
-        ) : usersQuery.isError || rolesQuery.isError ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-200">
-            {t("rbac.loadFailed")}
-          </div>
-        ) : (
-          <>
-            {activeSection === "users" ? (
+        {activeSection === "users" ? (
               <section className={RBAC_PANEL_CLASS}>
                 <div className="mb-4 flex items-center gap-2">
                   <UserPlus size={18} className="text-slate-500 dark:text-slate-400" />
@@ -574,6 +642,7 @@ export function RbacPage() {
                       <WorkspaceSelectField
                         value={selectedRoleId}
                         onChange={setRoleId}
+                        disabled={!rolesResolved}
                         size="compact"
                         options={assignableRoles.map((role) => ({
                           value: role.id,
@@ -598,6 +667,7 @@ export function RbacPage() {
                       <ClassicSelectField
                         value={selectedRoleId}
                         onChange={setRoleId}
+                        disabled={!rolesResolved}
                         size="compact"
                         options={assignableRoles.map((role) => ({
                           value: role.id,
@@ -608,7 +678,7 @@ export function RbacPage() {
                   )}
                   <PageActionButton
                     type="submit"
-                    disabled={createUserMutation.isPending}
+                    disabled={!rolesResolved || createUserMutation.isPending}
                     preset="primary"
                     size="md"
                     loading={createUserMutation.isPending}
@@ -617,9 +687,27 @@ export function RbacPage() {
                     {t("rbac.add")}
                   </PageActionButton>
                 </form>
+                {rolesPhase === "initial-error" ? (
+                  <AsyncErrorState
+                    className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+                    title={t("rbac.loadFailed")}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("app.loading")}
+                    retrying={rolesState.fetch === "fetching"}
+                    onRetry={() => void rolesQuery.refetch()}
+                  />
+                ) : rolesPhase === "paused" ? (
+                  <AsyncPausedState
+                    className="mt-3 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-100"
+                    title={t("app.requestPaused.title")}
+                    message={t("app.requestPaused.message")}
+                    retryLabel={t("common.retry")}
+                    onRetry={() => void rolesQuery.refetch()}
+                  />
+                ) : null}
               </section>
-            ) : null}
-            {activeSection === "roles" ? (
+        ) : null}
+        {activeSection === "roles" ? (
               <>
                 <section className={RBAC_PANEL_CLASS}>
                   <div className="mb-4 flex items-center gap-2">
@@ -632,12 +720,14 @@ export function RbacPage() {
                         <WorkspaceTextInput
                           value={roleCode}
                           onChange={(event) => setRoleCode(event.target.value)}
+                          disabled={!rolesResolved || createRoleMutation.isPending}
                           placeholder={t("rbac.roleCode")}
                           size="compact"
                         />
                         <WorkspaceTextInput
                           value={roleName}
                           onChange={(event) => setRoleName(event.target.value)}
+                          disabled={!rolesResolved || createRoleMutation.isPending}
                           placeholder={t("rbac.roleName")}
                           size="compact"
                         />
@@ -647,12 +737,14 @@ export function RbacPage() {
                         <ClassicTextInput
                           value={roleCode}
                           onChange={(event) => setRoleCode(event.target.value)}
+                          disabled={!rolesResolved || createRoleMutation.isPending}
                           placeholder={t("rbac.roleCode")}
                           size="compact"
                         />
                         <ClassicTextInput
                           value={roleName}
                           onChange={(event) => setRoleName(event.target.value)}
+                          disabled={!rolesResolved || createRoleMutation.isPending}
                           placeholder={t("rbac.roleName")}
                           size="compact"
                         />
@@ -660,7 +752,7 @@ export function RbacPage() {
                     )}
                     <PageActionButton
                       type="submit"
-                      disabled={createRoleMutation.isPending}
+                      disabled={!rolesResolved || createRoleMutation.isPending}
                       preset="primary"
                       size="md"
                       loading={createRoleMutation.isPending}
@@ -690,6 +782,7 @@ export function RbacPage() {
                       <WorkspaceTextInput
                         value={roleSearch}
                         onChange={(event) => setRoleSearch(event.target.value)}
+                        disabled={!rolesResolved}
                         placeholder={t("rbac.roleSearchPlaceholder")}
                         size="compact"
                         className="pl-9 pr-9"
@@ -698,6 +791,7 @@ export function RbacPage() {
                       <ClassicTextInput
                         value={roleSearch}
                         onChange={(event) => setRoleSearch(event.target.value)}
+                        disabled={!rolesResolved}
                         placeholder={t("rbac.roleSearchPlaceholder")}
                         size="compact"
                         className="pl-9 pr-9"
@@ -717,41 +811,86 @@ export function RbacPage() {
                     ) : null}
                   </label>
 
-                  {filteredRoles.length ? filteredRoles.map((role) => {
-                    const active = selectedPermissionRole?.id === role.id;
-                    return (
-                      <LayoutActionSurfaceButton
-                        key={role.id}
-                        appearance={actionAppearance}
-                        preset="secondary"
-                        aria-pressed={active}
-                        onClick={() => setSelectedPermissionRoleId(role.id)}
-                        style={RBAC_SELECTABLE_SURFACE_STYLE}
-                        className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left active:scale-[0.99]"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-semibold">{role.name}</div>
-                          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-                            <span className="max-w-full truncate text-xs text-slate-500 dark:text-slate-400">
-                              {role.code}
-                            </span>
-                            <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                              {t("rbac.roleUserCount", { count: role.user_count })}
-                            </span>
-                          </div>
+                  <AsyncContent
+                    state={rolesState}
+                    refreshIntent="background"
+                    loadingLabel={t("app.loading")}
+                    skeleton={<SkeletonRows count={4} />}
+                    initialError={(
+                      <AsyncErrorState
+                        title={t("rbac.loadFailed")}
+                        retryLabel={t("common.retry")}
+                        retryingLabel={t("app.loading")}
+                        retrying={rolesState.fetch === "fetching"}
+                        onRetry={() => void rolesQuery.refetch()}
+                      />
+                    )}
+                    paused={(
+                      <AsyncPausedState
+                        title={t("app.requestPaused.title")}
+                        message={t("app.requestPaused.message")}
+                        retryLabel={t("common.retry")}
+                        onRetry={() => void rolesQuery.refetch()}
+                      />
+                    )}
+                    inactive={null}
+                    empty={(
+                      <div className={`${RBAC_FIELD_CARD_CLASS} border-dashed px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-400`}>
+                        {t("rbac.noRoles")}
+                      </div>
+                    )}
+                    refreshFeedback={
+                      rolesState.error === "refresh" ? (
+                        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                          <span>{t("rbac.loadFailed")}</span>
+                          <PageActionButton
+                            preset="secondary"
+                            size="sm"
+                            className="shrink-0 text-xs"
+                            onClick={() => void rolesQuery.refetch()}
+                          >
+                            {t("common.retry")}
+                          </PageActionButton>
                         </div>
-                        {role.is_admin ? (
-                          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                            {t("rbac.adminRole")}
-                          </span>
-                        ) : null}
-                      </LayoutActionSurfaceButton>
-                    );
-                  }) : (
-                    <div className={`${RBAC_FIELD_CARD_CLASS} border-dashed px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-400`}>
-                      {t("rbac.noMatchingRoles")}
-                    </div>
-                  )}
+                      ) : null
+                    }
+                  >
+                    {filteredRoles.length ? filteredRoles.map((role) => {
+                      const active = selectedPermissionRole?.id === role.id;
+                      return (
+                        <LayoutActionSurfaceButton
+                          key={role.id}
+                          appearance={actionAppearance}
+                          preset="secondary"
+                          aria-pressed={active}
+                          onClick={() => setSelectedPermissionRoleId(role.id)}
+                          style={RBAC_SELECTABLE_SURFACE_STYLE}
+                          className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left active:scale-[0.99]"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold">{role.name}</div>
+                            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+                              <span className="max-w-full truncate text-xs text-slate-500 dark:text-slate-400">
+                                {role.code}
+                              </span>
+                              <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                {t("rbac.roleUserCount", { count: role.user_count })}
+                              </span>
+                            </div>
+                          </div>
+                          {role.is_admin ? (
+                            <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                              {t("rbac.adminRole")}
+                            </span>
+                          ) : null}
+                        </LayoutActionSurfaceButton>
+                      );
+                    }) : (
+                      <div className={`${RBAC_FIELD_CARD_CLASS} border-dashed px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-400`}>
+                        {t("rbac.noMatchingRoles")}
+                      </div>
+                    )}
+                  </AsyncContent>
                 </div>
 
                 <div className="min-w-0 border-t border-slate-200 pt-4 dark:border-slate-800 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
@@ -783,21 +922,53 @@ export function RbacPage() {
                   <div className={`${RBAC_FIELD_CARD_CLASS} px-3 py-6 text-sm text-slate-500 dark:text-slate-400`}>
                     {emptyPermissionRoleMessage}
                   </div>
-                ) : permissionsLoading ? (
-                  <div className={`${RBAC_FIELD_CARD_CLASS} flex items-center gap-2 px-3 py-6 text-sm text-slate-500 dark:text-slate-400`}>
-                    <Loader2 size={16} className="animate-spin" />
-                    {t("app.loading")}
-                  </div>
-                ) : permissionCatalogQuery.isError || rolePermissionsQuery.isError || !rolePermissionDraft ? (
-                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm font-medium text-red-700 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-200">
-                    {t("rbac.permissionCatalogLoadFailed")}
-                  </div>
-                ) : selectedPermissionRole.is_admin ? (
-                  <div className={`${RBAC_FIELD_CARD_CLASS} px-3 py-6 text-sm text-slate-600 dark:text-slate-300`}>
-                    {t("rbac.adminRoleReadonly")}
-                  </div>
                 ) : (
-                  <div className="space-y-6">
+                  <AsyncContent
+                    state={permissionsState}
+                    refreshIntent="background"
+                    loadingLabel={t("app.loading")}
+                    skeleton={<SkeletonRows count={5} />}
+                    initialError={(
+                      <AsyncErrorState
+                        title={t("rbac.permissionCatalogLoadFailed")}
+                        retryLabel={t("common.retry")}
+                        retryingLabel={t("app.loading")}
+                        retrying={permissionsState.fetch === "fetching"}
+                        onRetry={retryPermissions}
+                      />
+                    )}
+                    paused={(
+                      <AsyncPausedState
+                        title={t("app.requestPaused.title")}
+                        message={t("app.requestPaused.message")}
+                        retryLabel={t("common.retry")}
+                        onRetry={retryPermissions}
+                      />
+                    )}
+                    inactive={null}
+                    empty={null}
+                    refreshFeedback={
+                      permissionsState.error === "refresh" ? (
+                        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                          <span>{t("rbac.permissionCatalogLoadFailed")}</span>
+                          <PageActionButton
+                            preset="secondary"
+                            size="sm"
+                            className="shrink-0 text-xs"
+                            onClick={retryPermissions}
+                          >
+                            {t("common.retry")}
+                          </PageActionButton>
+                        </div>
+                      ) : null
+                    }
+                  >
+                    {selectedPermissionRole.is_admin ? (
+                      <div className={`${RBAC_FIELD_CARD_CLASS} px-3 py-6 text-sm text-slate-600 dark:text-slate-300`}>
+                        {t("rbac.adminRoleReadonly")}
+                      </div>
+                    ) : rolePermissionDraft ? (
+                      <div className="space-y-6">
                     <div>
                       <h3 className="mb-3 text-sm font-semibold">{t("rbac.menuPermissions")}</h3>
                       <div className="grid gap-2 sm:grid-cols-2">
@@ -855,7 +1026,11 @@ export function RbacPage() {
                         ))}
                       </div>
                     </div>
-                  </div>
+                      </div>
+                    ) : (
+                      <SkeletonRows count={5} />
+                    )}
+                  </AsyncContent>
                 )}
               </div>
               </div>
@@ -915,6 +1090,7 @@ export function RbacPage() {
                             setUserRoleFilter(value);
                             setUserPage(1);
                           }}
+                          disabled={!rolesResolved}
                           size="compact"
                           options={[
                             { value: "", label: t("rbac.allRoles") },
@@ -928,6 +1104,7 @@ export function RbacPage() {
                             setUserRoleFilter(value);
                             setUserPage(1);
                           }}
+                          disabled={!rolesResolved}
                           size="compact"
                           options={[
                             { value: "", label: t("rbac.allRoles") },
@@ -958,6 +1135,56 @@ export function RbacPage() {
                   </form>
                 </div>
               </div>
+              <AsyncContent
+                state={usersState}
+                refreshIntent="parameter-change"
+                loadingLabel={t("app.loading")}
+                skeleton={(
+                  <div className="px-4 py-3">
+                    <SkeletonRows count={6} />
+                  </div>
+                )}
+                initialError={(
+                  <AsyncErrorState
+                    className="m-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+                    title={t("rbac.loadFailed")}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("app.loading")}
+                    retrying={usersState.fetch === "fetching"}
+                    onRetry={() => void usersQuery.refetch()}
+                  />
+                )}
+                paused={(
+                  <AsyncPausedState
+                    className="m-4 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-100"
+                    title={t("app.requestPaused.title")}
+                    message={t("app.requestPaused.message")}
+                    retryLabel={t("common.retry")}
+                    onRetry={() => void usersQuery.refetch()}
+                  />
+                )}
+                inactive={null}
+                empty={(
+                  <div className="min-h-40 px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+                    {t("rbac.noMatchingUsers")}
+                  </div>
+                )}
+                refreshFeedback={
+                  usersState.error === "refresh" ? (
+                    <div className="mx-4 mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                      <span>{t("rbac.loadFailed")}</span>
+                      <PageActionButton
+                        preset="secondary"
+                        size="sm"
+                        className="shrink-0 text-xs"
+                        onClick={() => void usersQuery.refetch()}
+                      >
+                        {t("common.retry")}
+                      </PageActionButton>
+                    </div>
+                  ) : null
+                }
+              >
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
                   <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
@@ -970,8 +1197,7 @@ export function RbacPage() {
 	                    </tr>
                   </thead>
                   <tbody className="pf-gradient-table-body">
-                    {users.length ? (
-                      users.map((user) => {
+                    {users.map((user) => {
                         const disabled = !user.enabled;
                         const statusLabel = disabled
                           ? t("rbac.disabled")
@@ -1080,14 +1306,7 @@ export function RbacPage() {
                             </td>
                           </tr>
                         );
-                      })
-	                    ) : (
-	                      <tr>
-	                        <td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
-	                          {usersQuery.isFetching ? t("app.loading") : t("rbac.noMatchingUsers")}
-	                        </td>
-	                      </tr>
-                    )}
+                      })}
                   </tbody>
                 </table>
               </div>
@@ -1107,11 +1326,10 @@ export function RbacPage() {
                   workspaceSubpage={isWorkspaceSubpage}
                 />
               </div>
+              </AsyncContent>
             </section>
 	          </>
 	        ) : null}
-          </>
-        )}
       </main>
       <ConfirmDialog
         open={Boolean(pendingUserAction)}
@@ -1130,10 +1348,10 @@ export function RbacPage() {
         user={resourceGroupGrantUser}
         groups={generationResourceGroups}
         draft={resourceGroupGrantDraft}
-        loading={resourceGroupGrantsLoading}
+        state={resourceGroupGrantsState}
         busy={saveResourceGroupGrantsMutation.isPending}
         workspaceSubpage={isWorkspaceSubpage}
-        hasError={generationResourceGroupsQuery.isError || resourceGroupGrantsQuery.isError}
+        onRetry={retryResourceGroupGrants}
         onClose={() => {
           if (saveResourceGroupGrantsMutation.isPending) {
             return;
@@ -1169,10 +1387,10 @@ interface ResourceGroupGrantDialogProps {
   user: RbacUser | null;
   groups: GenerationResourceGroup[];
   draft: string[];
-  loading: boolean;
+  state: AsyncViewState;
   busy: boolean;
   workspaceSubpage?: boolean;
-  hasError: boolean;
+  onRetry: () => void;
   onClose: () => void;
   onSave: () => void;
   onToggleGroup: (groupId: string, checked: boolean) => void;
@@ -1262,10 +1480,10 @@ function ResourceGroupGrantDialog({
   user,
   groups,
   draft,
-  loading,
+  state,
   busy,
   workspaceSubpage = false,
-  hasError,
+  onRetry,
   onClose,
   onSave,
   onToggleGroup,
@@ -1278,6 +1496,8 @@ function ResourceGroupGrantDialog({
   }
 
   const readonly = user.is_admin;
+  const phase = asyncViewPhase(state);
+  const resolved = phase === "empty" || phase === "ready";
 
   return (
     <ModalShell
@@ -1312,32 +1532,64 @@ function ResourceGroupGrantDialog({
             <div className={`${RBAC_FIELD_CARD_CLASS} px-4 py-6 text-sm text-slate-600 dark:text-slate-300`}>
               {t("rbac.adminResourceGroupsReadonly")}
             </div>
-          ) : loading ? (
-            <div className={`${RBAC_FIELD_CARD_CLASS} flex items-center gap-2 px-4 py-6 text-sm text-slate-500 dark:text-slate-400`}>
-              <Loader2 size={16} className="animate-spin" />
-              {t("app.loading")}
-            </div>
-          ) : hasError ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-500/35 dark:bg-red-500/10 dark:text-red-200">
-              {t("rbac.resourceGroupsLoadFailed")}
-            </div>
-          ) : groups.length ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {groups.map((group) => (
-                <ResourceGroupGrantCheckbox
-                  key={group.id}
-                  group={group}
-                  checked={draft.includes(group.id)}
-                  disabled={busy}
-                  workspaceSubpage={workspaceSubpage}
-                  onToggle={(checked) => onToggleGroup(group.id, checked)}
-                />
-              ))}
-            </div>
           ) : (
-            <div className={`${RBAC_FIELD_CARD_CLASS} border-dashed px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400`}>
-              {t("rbac.noResourceGroups")}
-            </div>
+            <AsyncContent
+              state={state}
+              refreshIntent="background"
+              loadingLabel={t("app.loading")}
+              skeleton={<SkeletonRows count={4} />}
+              initialError={(
+                <AsyncErrorState
+                  title={t("rbac.resourceGroupsLoadFailed")}
+                  retryLabel={t("common.retry")}
+                  retryingLabel={t("app.loading")}
+                  retrying={state.fetch === "fetching"}
+                  onRetry={onRetry}
+                />
+              )}
+              paused={(
+                <AsyncPausedState
+                  title={t("app.requestPaused.title")}
+                  message={t("app.requestPaused.message")}
+                  retryLabel={t("common.retry")}
+                  onRetry={onRetry}
+                />
+              )}
+              inactive={null}
+              empty={(
+                <div className={`${RBAC_FIELD_CARD_CLASS} border-dashed px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400`}>
+                  {t("rbac.noResourceGroups")}
+                </div>
+              )}
+              refreshFeedback={
+                state.error === "refresh" ? (
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+                    <span>{t("rbac.resourceGroupsLoadFailed")}</span>
+                    <PageActionButton
+                      preset="secondary"
+                      size="sm"
+                      className="shrink-0 text-xs"
+                      onClick={onRetry}
+                    >
+                      {t("common.retry")}
+                    </PageActionButton>
+                  </div>
+                ) : null
+              }
+            >
+              <div className="grid gap-3 sm:grid-cols-2">
+                {groups.map((group) => (
+                  <ResourceGroupGrantCheckbox
+                    key={group.id}
+                    group={group}
+                    checked={draft.includes(group.id)}
+                    disabled={busy}
+                    workspaceSubpage={workspaceSubpage}
+                    onToggle={(checked) => onToggleGroup(group.id, checked)}
+                  />
+                ))}
+              </div>
+            </AsyncContent>
           )}
         </div>
 
@@ -1347,7 +1599,7 @@ function ResourceGroupGrantDialog({
           </PageActionButton>
           <PageActionButton
             onClick={onSave}
-            disabled={readonly || loading || busy}
+            disabled={readonly || !resolved || busy}
             preset="primary"
             size="md"
             loading={busy}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Code2, Download, Eye, FileCode2, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { Code2, Download, Eye, FileCode2, RefreshCw, Sparkles } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -12,6 +12,8 @@ import {
   actionButtonComponentForAppearance,
   type LayoutActionAppearance,
 } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { SkeletonRows } from "../components/loading/Skeleton";
 import { ResourceLibraryModal } from "../components/resource-library/ResourceLibraryModal";
 import { TopNav } from "../components/TopNav";
 import {
@@ -21,6 +23,7 @@ import {
   WorkspaceTextarea,
 } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import { asyncViewStateFromQuery } from "../lib/asyncViewState";
 import { formatDateTime } from "../lib/format";
 import type { TranslationKey } from "../lib/i18n";
 import { useI18n } from "../lib/preferences";
@@ -225,6 +228,15 @@ function ImageToCodePageContent({ workspaceSubpage }: { workspaceSubpage: boolea
   });
 
   const jobs = jobsQuery.data?.items ?? [];
+  const jobsViewState = asyncViewStateFromQuery({
+    active: true,
+    data: jobsQuery.data,
+    dataUpdatedAt: jobsQuery.dataUpdatedAt,
+    isSuccess: jobsQuery.isSuccess,
+    isError: jobsQuery.isError,
+    fetchStatus: jobsQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
   const totalJobs = jobsQuery.data?.total ?? jobs.length;
   const totalPages = Math.max(1, Math.ceil(totalJobs / PAGE_SIZE));
   const selectedJob = selectedJobQuery.data ?? jobs.find((job) => job.id === selectedJobId) ?? jobs[0] ?? null;
@@ -541,15 +553,53 @@ function ImageToCodePageContent({ workspaceSubpage }: { workspaceSubpage: boolea
                     </div>
                   </div>
 
-                  {jobsQuery.isLoading ? (
-                    <div className="flex min-h-40 items-center justify-center pf-ink-muted">
-                      <Loader2 size={22} className="animate-spin" />
-                    </div>
-                  ) : jobsQuery.isError ? (
-                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100">
-                      {t("imageToCode.error.loadFailed")}
-                    </div>
-                  ) : jobs.length ? (
+                  <AsyncContent
+                    state={jobsViewState}
+                    refreshIntent="silent-poll"
+                    loadingLabel={t("app.loading")}
+                    skeleton={<SkeletonRows count={5} />}
+                    initialError={(
+                      <AsyncErrorState
+                        title={t("imageToCode.error.loadFailed")}
+                        retryLabel={t("common.retry")}
+                        retryingLabel={t("app.loading")}
+                        retrying={jobsViewState.fetch === "fetching"}
+                        onRetry={() => void jobsQuery.refetch()}
+                      />
+                    )}
+                    paused={(
+                      <AsyncPausedState
+                        title={t("app.requestPaused.title")}
+                        message={t("app.requestPaused.message")}
+                        retryLabel={t("common.retry")}
+                        onRetry={() => void jobsQuery.refetch()}
+                      />
+                    )}
+                    inactive={null}
+                    empty={(
+                      <div className="flex min-h-40 items-center justify-center rounded-2xl border border-dashed pf-hairline pf-surface-soft px-4 text-sm pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]">
+                        {t("imageToCode.emptyJobs")}
+                      </div>
+                    )}
+                    refreshFeedback={jobsViewState.error === "refresh" ? (
+                      <AsyncErrorState
+                        className="pf-async-error mt-3 rounded-xl border px-4 py-3 text-sm"
+                        title={t("imageToCode.error.loadFailed")}
+                        retryLabel={t("common.retry")}
+                        retryingLabel={t("app.loading")}
+                        retrying={jobsViewState.fetch === "fetching"}
+                        onRetry={() => void jobsQuery.refetch()}
+                      />
+                    ) : jobsViewState.fetch === "paused" ? (
+                      <AsyncPausedState
+                        className="pf-async-paused mt-3 rounded-xl border px-4 py-3 text-sm"
+                        title={t("app.requestPaused.title")}
+                        message={t("app.requestPaused.message")}
+                        retryLabel={t("common.retry")}
+                        onRetry={() => void jobsQuery.refetch()}
+                      />
+                    ) : null}
+                  >
                     <div className="space-y-2">
                       {jobs.map((job) => {
                         const selected = job.id === selectedJob?.id;
@@ -625,11 +675,7 @@ function ImageToCodePageContent({ workspaceSubpage }: { workspaceSubpage: boolea
                         </PageActionButton>
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex min-h-40 items-center justify-center rounded-2xl border border-dashed pf-hairline pf-surface-soft px-4 text-sm pf-ink-muted dark:border-[color:var(--pf-border)] dark:bg-[color:var(--pf-deep)] dark:text-[color:var(--pf-muted)]">
-                      {t("imageToCode.emptyJobs")}
-                    </div>
-                  )}
+                  </AsyncContent>
                 </section>
 
                 <section className={panelClassName}>

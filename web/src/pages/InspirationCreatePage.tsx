@@ -7,7 +7,6 @@ import {
   FileText,
   ImagePlus,
   LayoutTemplate,
-  Loader2,
   Plus,
   Search,
   Settings2,
@@ -26,7 +25,10 @@ import {
   type LayoutActionAppearance,
 } from "../components/layoutActionButtons";
 import { MarkdownEditor } from "../components/MarkdownEditor";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { Skeleton, SkeletonRows } from "../components/loading/Skeleton";
 import { ParameterHelpButton, ParameterHelpLabel } from "../components/ParameterHelp";
+import { TopNav } from "../components/TopNav";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -35,6 +37,7 @@ import {
 import { ResourceLibraryModal } from "../components/resource-library/ResourceLibraryModal";
 import { WorkspaceOptionToggle, WorkspaceSelectField, WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
+import { asyncViewPhase, asyncViewStateFromQuery } from "../lib/asyncViewState";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
 import { dynamicFieldsToRecord, type DynamicFieldDraft } from "../lib/dynamicFields";
 import { INSPIRATION_CONTEXT_MARKDOWN_MAX_LENGTH } from "../lib/markdown";
@@ -355,12 +358,44 @@ export function InspirationCreatePage() {
     queryKey: ["my-generation-resource-groups"],
     queryFn: api.listMyGenerationResourceGroups,
   });
+  const templatesState = asyncViewStateFromQuery({
+    active: true,
+    data: templatesQuery.data,
+    dataUpdatedAt: templatesQuery.dataUpdatedAt,
+    isSuccess: templatesQuery.isSuccess,
+    isError: templatesQuery.isError,
+    fetchStatus: templatesQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const templatesPhase = asyncViewPhase(templatesState);
+  const templateCategoriesState = asyncViewStateFromQuery({
+    active: true,
+    data: templateCategoriesQuery.data,
+    dataUpdatedAt: templateCategoriesQuery.dataUpdatedAt,
+    isSuccess: templateCategoriesQuery.isSuccess,
+    isError: templateCategoriesQuery.isError,
+    fetchStatus: templateCategoriesQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const generationResourceGroupsState = asyncViewStateFromQuery({
+    active: true,
+    data: generationResourceGroupsQuery.data,
+    dataUpdatedAt: generationResourceGroupsQuery.dataUpdatedAt,
+    isSuccess: generationResourceGroupsQuery.isSuccess,
+    isError: generationResourceGroupsQuery.isError,
+    fetchStatus: generationResourceGroupsQuery.fetchStatus,
+    isEmpty: (data) => activeGenerationResourceGroupsInApiOrder(data).length === 0,
+  });
+  const generationResourceGroupsPhase = asyncViewPhase(generationResourceGroupsState);
   const resourceGroups = useMemo<GenerationResourceGroup[]>(
     () => activeGenerationResourceGroupsInApiOrder(generationResourceGroupsQuery.data),
     [generationResourceGroupsQuery.data],
   );
 
   useEffect(() => {
+    if (generationResourceGroupsPhase !== "ready" && generationResourceGroupsPhase !== "empty") {
+      return;
+    }
     if (!resourceGroups.length) {
       if (selectedResourceGroupId) {
         setSelectedResourceGroupId(null);
@@ -370,7 +405,7 @@ export function InspirationCreatePage() {
     if (!selectedResourceGroupId || !resourceGroups.some((group) => group.id === selectedResourceGroupId)) {
       setSelectedResourceGroupId(resourceGroups[0].id);
     }
-  }, [resourceGroups, selectedResourceGroupId]);
+  }, [generationResourceGroupsPhase, resourceGroups, selectedResourceGroupId]);
 
   const canvasPlanOptions = useMemo(() => {
     const blankCanvasPreviewNodes: PreviewNode[] =
@@ -450,10 +485,13 @@ export function InspirationCreatePage() {
   const templateCategories = templateCategoriesQuery.data?.items ?? [];
 
   useEffect(() => {
+    if (templatesPhase !== "ready") {
+      return;
+    }
     if (!canvasPlanOptions.some((option) => option.key === canvasTemplateKey)) {
       setCanvasTemplateKey("");
     }
-  }, [canvasPlanOptions, canvasTemplateKey]);
+  }, [canvasPlanOptions, canvasTemplateKey, templatesPhase]);
 
   const handleInitialWorkflowEntryChange = (value: InspirationInitialWorkflowEntry) => {
     setInitialWorkflowEntry(value);
@@ -680,6 +718,44 @@ export function InspirationCreatePage() {
       ? t("create.mainImageSourceLibrary")
       : t("create.mainImageEmpty");
   const mainImageUploadLabel = hasMainImage ? t("create.replaceMainImage") : t("create.uploadMainImage");
+  const templateCategorySelect = (
+    <LayoutSelectField
+      value={templateCategoryId}
+      onChange={setTemplateCategoryId}
+      size="compact"
+      ariaLabel={t("templateFilter.category")}
+      options={[
+        { value: "", label: t("templateFilter.allCategories") },
+        ...templateCategories.map((category) => ({
+          value: category.id,
+          label: category.name,
+        })),
+      ]}
+    />
+  );
+  const generationResourceGroupSelect = (
+    <LayoutSelectField
+      value={selectedResourceGroupId ?? ""}
+      onChange={(value) => {
+        setSelectedResourceGroupId(value || null);
+        setError("");
+      }}
+      disabled={!resourceGroups.length}
+      size="compact"
+      ariaLabel={t("create.resourceGroup")}
+      options={[
+        {
+          value: "",
+          label: resourceGroups.length ? t("create.selectResourceGroup") : t("create.noResourceGroups"),
+          disabled: true,
+        },
+        ...resourceGroups.map((group) => ({
+          value: group.id,
+          label: group.name,
+        })),
+      ]}
+    />
+  );
 
   useEffect(() => {
     setMainImageNaturalSize(null);
@@ -703,15 +779,8 @@ export function InspirationCreatePage() {
             title={t("templateManage.personalTitle")}
             leadingIcon={<Settings2 size={14} />}
           />
-          {templatesQuery.isLoading ? <Loader2 size={16} className="animate-spin text-zinc-400" /> : null}
         </div>
       </div>
-
-      {templatesQuery.isError ? (
-        <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-          {t("create.templateLoadFailed")}
-        </div>
-      ) : null}
 
       <div className="mt-4 space-y-3">
         <label className="block">
@@ -735,20 +804,40 @@ export function InspirationCreatePage() {
             <span className="mb-1.5 block text-xs font-medium text-zinc-500 dark:text-slate-400">
               {t("templateFilter.category")}
             </span>
-            <LayoutSelectField
-              value={templateCategoryId}
-              onChange={setTemplateCategoryId}
-              disabled={templateCategoriesQuery.isLoading || templateCategoriesQuery.isError}
-              size="compact"
-              ariaLabel={t("templateFilter.category")}
-              options={[
-                { value: "", label: t("templateFilter.allCategories") },
-                ...templateCategories.map((category) => ({
-                  value: category.id,
-                  label: category.name,
-                })),
-              ]}
-            />
+            <AsyncContent
+              state={templateCategoriesState}
+              refreshIntent="parameter-change"
+              loadingLabel={t("app.loading")}
+              skeleton={<Skeleton className="h-9 w-full" rounded="lg" />}
+              initialError={(
+                <AsyncErrorState
+                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+                  title={t("templateFilter.categoriesLoadFailed")}
+                  retryLabel={t("common.retry")}
+                  retryingLabel={t("app.loading")}
+                  retrying={templateCategoriesState.fetch === "fetching"}
+                  onRetry={() => void templateCategoriesQuery.refetch()}
+                />
+              )}
+              paused={(
+                <AsyncPausedState
+                  title={t("app.requestPaused.title")}
+                  retryLabel={t("common.retry")}
+                  onRetry={() => void templateCategoriesQuery.refetch()}
+                />
+              )}
+              inactive={null}
+              empty={templateCategorySelect}
+              refreshFeedback={
+                templateCategoriesState.error === "refresh" ? (
+                  <div className="mt-2 text-xs text-red-600 dark:text-red-300">
+                    {t("templateFilter.categoriesLoadFailed")}
+                  </div>
+                ) : null
+              }
+            >
+              {templateCategorySelect}
+            </AsyncContent>
           </label>
           <div>
             <div className="mb-1.5 text-xs font-medium text-zinc-500 dark:text-slate-400">
@@ -781,13 +870,56 @@ export function InspirationCreatePage() {
             </div>
           </div>
         </div>
-        {templateCategoriesQuery.isError ? (
-          <div className="text-xs text-red-600 dark:text-red-300">{t("templateFilter.categoriesLoadFailed")}</div>
-        ) : null}
       </div>
 
-      <div className="mt-4 max-h-[42dvh] space-y-5 overflow-y-auto pr-1 md:max-h-[420px] xl:max-h-[520px]">
-        {planGroups.map((group) => (
+      <AsyncContent
+        state={templatesState}
+        refreshIntent="parameter-change"
+        loadingLabel={t("app.loading")}
+        skeleton={(
+          <div className="mt-4 max-h-[42dvh] overflow-hidden pr-1 md:max-h-[420px] xl:max-h-[520px]">
+            <SkeletonRows count={5} />
+          </div>
+        )}
+        initialError={(
+          <AsyncErrorState
+            className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+            title={t("create.templateLoadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={templatesState.fetch === "fetching"}
+            onRetry={() => void templatesQuery.refetch()}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={() => void templatesQuery.refetch()}
+            className="mt-4 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-100"
+          />
+        )}
+        inactive={null}
+        empty={null}
+        refreshFeedback={
+          templatesState.error === "refresh" ? (
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100">
+              <span>{t("create.templateLoadFailed")}</span>
+              <ActionButton
+                preset="secondary"
+                size="sm"
+                className="shrink-0 text-xs"
+                onClick={() => void templatesQuery.refetch()}
+              >
+                {t("common.retry")}
+              </ActionButton>
+            </div>
+          ) : null
+        }
+      >
+        <div className="mt-4 max-h-[42dvh] space-y-5 overflow-y-auto pr-1 md:max-h-[420px] xl:max-h-[520px]">
+          {planGroups.map((group) => (
           <div key={group.stage}>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500 dark:text-slate-400">{group.label}</h3>
@@ -844,8 +976,9 @@ export function InspirationCreatePage() {
               })}
             </div>
           </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </AsyncContent>
     </>
   );
 
@@ -876,7 +1009,9 @@ export function InspirationCreatePage() {
   );
 
   return (
-    <div className="pf-workspace px-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-4 text-zinc-900 dark:text-slate-100 sm:px-6 md:pb-8 lg:px-8">
+    <>
+      <TopNav />
+      <div className="pf-workspace px-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-4 text-zinc-900 dark:text-slate-100 sm:px-6 md:pb-8 lg:px-8">
       <main className="mx-auto max-w-[1480px]">
         <div className="mb-5 flex items-start justify-between gap-4 border-b border-slate-200/80 pb-4 dark:border-slate-800">
           <div className="flex items-center gap-3">
@@ -932,27 +1067,40 @@ export function InspirationCreatePage() {
                   <span className="mb-2 block text-sm font-medium text-zinc-700 dark:text-slate-300">
                     {t("create.resourceGroup")} <span className="text-red-500">*</span>
                   </span>
-                  <LayoutSelectField
-                    value={selectedResourceGroupId ?? ""}
-                    onChange={(value) => {
-                      setSelectedResourceGroupId(value || null);
-                      setError("");
-                    }}
-                    disabled={generationResourceGroupsQuery.isLoading || !resourceGroups.length}
-                    size="compact"
-                    ariaLabel={t("create.resourceGroup")}
-                    options={[
-                      {
-                        value: "",
-                        label: resourceGroups.length ? t("create.selectResourceGroup") : t("create.noResourceGroups"),
-                        disabled: true,
-                      },
-                      ...resourceGroups.map((group) => ({
-                        value: group.id,
-                        label: group.name,
-                      })),
-                    ]}
-                  />
+                  <AsyncContent
+                    state={generationResourceGroupsState}
+                    refreshIntent="background"
+                    loadingLabel={t("app.loading")}
+                    skeleton={<Skeleton className="h-9 w-full" rounded="lg" />}
+                    initialError={(
+                      <AsyncErrorState
+                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+                        title={t("create.resourceGroupLoadFailed")}
+                        retryLabel={t("common.retry")}
+                        retryingLabel={t("app.loading")}
+                        retrying={generationResourceGroupsState.fetch === "fetching"}
+                        onRetry={() => void generationResourceGroupsQuery.refetch()}
+                      />
+                    )}
+                    paused={(
+                      <AsyncPausedState
+                        title={t("app.requestPaused.title")}
+                        retryLabel={t("common.retry")}
+                        onRetry={() => void generationResourceGroupsQuery.refetch()}
+                      />
+                    )}
+                    inactive={null}
+                    empty={generationResourceGroupSelect}
+                    refreshFeedback={
+                      generationResourceGroupsState.error === "refresh" ? (
+                        <div className="mt-2 text-xs text-red-600 dark:text-red-300">
+                          {t("create.resourceGroupLoadFailed")}
+                        </div>
+                      ) : null
+                    }
+                  >
+                    {generationResourceGroupSelect}
+                  </AsyncContent>
                 </label>
                 {INITIAL_WORKFLOW_ENTRY_OPTIONS.map((option) => {
                   const Icon = option.icon;
@@ -1382,7 +1530,8 @@ export function InspirationCreatePage() {
         selectLabel={t("create.selectMainImageFromLibrary")}
         selectDisabled={createInspirationMutation.isPending}
       />
-    </div>
+      </div>
+    </>
   );
 }
 

@@ -40,6 +40,7 @@ import {
   actionButtonComponentForAppearance,
   type LayoutActionAppearance,
 } from "../../components/layoutActionButtons";
+import { Skeleton } from "../../components/loading/Skeleton";
 import type { DownloadableImage } from "../../lib/image-downloads";
 import type { InspirationWorkflow, WorkflowNode } from "../../lib/types";
 import { WorkflowNodeCard } from "./WorkflowNodeCard";
@@ -135,6 +136,7 @@ type ConnectionHandleVisualState = "idle" | "origin" | "valid-target" | "invalid
 interface WorkflowCanvasProps {
   workflow: InspirationWorkflow | null;
   isLoading: boolean;
+  loadingLabel: string;
   selectedNodeId: string | null;
   selectedNodeIds: string[];
   structureBusy: boolean;
@@ -727,6 +729,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
   {
     workflow,
     isLoading,
+    loadingLabel,
     selectedNodeId,
     selectedNodeIds,
     structureBusy,
@@ -1321,8 +1324,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasHandle, WorkflowCanvasPro
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-zinc-400 dark:text-slate-500">
-        <span className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-transparent dark:border-slate-600 dark:border-t-transparent" />
+      <div className="h-full min-h-[24rem]" role="status" aria-busy="true">
+        <span className="sr-only">{loadingLabel}</span>
+        <Skeleton className="h-full min-h-[24rem] w-full rounded-none" />
       </div>
     );
   }

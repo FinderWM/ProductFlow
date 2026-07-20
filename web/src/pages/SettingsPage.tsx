@@ -10,12 +10,19 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GalleryTagPickerDialog } from "../components/GalleryTagPickerDialog";
 import { actionButtonComponentForAppearance } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { Skeleton } from "../components/loading/Skeleton";
 import {
   SaveToResourceLibraryDialog,
   type ResourceLibrarySaveSource,
 } from "../components/resource-library/SaveToResourceLibraryDialog";
 import { TopNav } from "../components/TopNav";
 import { api, ApiError } from "../lib/api";
+import {
+  asyncViewStateFromQuery,
+  combineAsyncViewStates,
+  type AsyncViewState,
+} from "../lib/asyncViewState";
 import { cssLengthToPixels } from "../lib/cssLength";
 import { useI18n } from "../lib/preferences";
 import {
@@ -154,7 +161,10 @@ import {
   SETTINGS_BORDERED_MODULE_CLASS,
 } from "./settings/components/styles";
 import { NotificationSettingsPanel } from "./settings/components/NotificationSettingsPanel";
-import { LoginPageSettingsPanel } from "./settings/components/LoginPageSettingsPanel";
+import {
+  LoginPageSettingsPanel,
+  loginPageSelectableAssets,
+} from "./settings/components/LoginPageSettingsPanel";
 import { ProviderDisableConfirmDialog } from "./settings/components/ProviderDisableConfirmDialog";
 import { ImageConfigTestResultDialog } from "./settings/components/ImageConfigTestResultDialog";
 import { GenerationResourceGroupSection } from "./settings/components/GenerationResourceGroupSection";
@@ -275,6 +285,46 @@ const SETTINGS_RUNTIME_CONFIG_SECTIONS = [
 
 type SettingsRuntimeConfigSection = (typeof SETTINGS_RUNTIME_CONFIG_SECTIONS)[number];
 
+interface SettingsSectionAsyncStates {
+  config: AsyncViewState;
+  providerProfiles: AsyncViewState;
+  generationResourceGroups: AsyncViewState;
+  providerGenerationConfigs: AsyncViewState;
+  resourceGroupGenerationConfigs: AsyncViewState;
+  textGenerationConfigs: AsyncViewState;
+  imageGenerationConfigs: AsyncViewState;
+}
+
+const READY_SETTINGS_SECTION_STATE: AsyncViewState = {
+  participation: "active",
+  content: "ready",
+  fetch: "idle",
+  error: "none",
+};
+
+export function settingsSectionAsyncState(
+  section: SettingsSectionId,
+  states: SettingsSectionAsyncStates,
+): AsyncViewState {
+  let critical: readonly AsyncViewState[] | null = null;
+
+  if (runtimeConfigSectionForSettingsSection(section)) {
+    critical = [states.config];
+  } else if (section === "providers") {
+    critical = [states.providerProfiles, states.providerGenerationConfigs];
+  } else if (section === "resourceGroups") {
+    critical = [states.generationResourceGroups, states.resourceGroupGenerationConfigs];
+  } else if (section === "text") {
+    critical = [states.providerProfiles, states.generationResourceGroups, states.textGenerationConfigs];
+  } else if (section === "image") {
+    critical = [states.providerProfiles, states.generationResourceGroups, states.imageGenerationConfigs];
+  }
+
+  return critical
+    ? combineAsyncViewStates({ active: true, critical, isEmpty: false })
+    : READY_SETTINGS_SECTION_STATE;
+}
+
 export function runtimeConfigSectionForSettingsSection(
   section: SettingsSectionId,
 ): SettingsRuntimeConfigSection | null {
@@ -340,8 +390,8 @@ function SettingsSectionLoadingState({ label }: { label: string }) {
       <span className="sr-only">{label}</span>
       <div className={`${PANEL_CLASS} ${SETTINGS_BORDERED_MODULE_CLASS} space-y-5`}>
         <div className="space-y-2">
-          <div className="h-4 w-36 animate-pulse rounded pf-surface-soft" />
-          <div className="h-3 w-2/3 animate-pulse rounded pf-surface-soft opacity-70" />
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="h-3 w-2/3 opacity-70" />
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           {Array.from({ length: 4 }, (_, index) => (
@@ -349,9 +399,9 @@ function SettingsSectionLoadingState({ label }: { label: string }) {
               key={index}
               className="min-h-28 rounded-lg border pf-hairline pf-surface p-4"
             >
-              <div className="h-3 w-28 animate-pulse rounded pf-surface-soft" />
-              <div className="mt-4 h-9 animate-pulse rounded pf-surface-soft opacity-70" />
-              <div className="mt-3 h-3 w-3/4 animate-pulse rounded pf-surface-soft opacity-70" />
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="mt-4 h-9 opacity-70" />
+              <Skeleton className="mt-3 h-3 w-3/4 opacity-70" />
             </div>
           ))}
         </div>
@@ -501,6 +551,15 @@ export function SettingsPage() {
     queryFn: () => api.listGalleryTags(),
     enabled: shouldLoadImageTestSupport,
   });
+  const galleryTagsState = asyncViewStateFromQuery({
+    active: shouldLoadImageTestSupport,
+    data: galleryTagsQuery.data,
+    dataUpdatedAt: galleryTagsQuery.dataUpdatedAt,
+    isSuccess: galleryTagsQuery.isSuccess,
+    isError: galleryTagsQuery.isError,
+    fetchStatus: galleryTagsQuery.fetchStatus,
+    isEmpty: (data) => data.length === 0,
+  });
 
   const providerProfilesQuery = useQuery({
     queryKey: ["provider-profiles"],
@@ -599,6 +658,96 @@ export function SettingsPage() {
     queryFn: () => api.listResourceLibraryAssets({ group_id: null }),
     enabled: shouldLoadTextTestSupport,
   });
+  const configState = asyncViewStateFromQuery({
+    active: shouldLoadConfig,
+    data: configQuery.data,
+    dataUpdatedAt: configQuery.dataUpdatedAt,
+    isSuccess: configQuery.isSuccess,
+    isError: configQuery.isError,
+    fetchStatus: configQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const loginPageAssetsState = asyncViewStateFromQuery({
+    active: activeSection === "loginPage",
+    data: loginPageAssetsQuery.data,
+    dataUpdatedAt: loginPageAssetsQuery.dataUpdatedAt,
+    isSuccess: loginPageAssetsQuery.isSuccess,
+    isError: loginPageAssetsQuery.isError,
+    fetchStatus: loginPageAssetsQuery.fetchStatus,
+    isEmpty: (data) => loginPageSelectableAssets(data.items).length === 0,
+  });
+  const textTestReferenceAssetsState = asyncViewStateFromQuery({
+    active: shouldLoadTextTestSupport,
+    data: textTestReferenceAssetsQuery.data,
+    dataUpdatedAt: textTestReferenceAssetsQuery.dataUpdatedAt,
+    isSuccess: textTestReferenceAssetsQuery.isSuccess,
+    isError: textTestReferenceAssetsQuery.isError,
+    fetchStatus: textTestReferenceAssetsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const providerProfilesState = asyncViewStateFromQuery({
+    active: shouldLoadProviderProfiles,
+    data: providerProfilesQuery.data,
+    dataUpdatedAt: providerProfilesQuery.dataUpdatedAt,
+    isSuccess: providerProfilesQuery.isSuccess,
+    isError: providerProfilesQuery.isError,
+    fetchStatus: providerProfilesQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const generationResourceGroupsState = asyncViewStateFromQuery({
+    active: shouldLoadGenerationResourceGroups,
+    data: generationResourceGroupsQuery.data,
+    dataUpdatedAt: generationResourceGroupsQuery.dataUpdatedAt,
+    isSuccess: generationResourceGroupsQuery.isSuccess,
+    isError: generationResourceGroupsQuery.isError,
+    fetchStatus: generationResourceGroupsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const providerGenerationConfigsState = asyncViewStateFromQuery({
+    active: activeSection === "providers",
+    data: providerGenerationConfigsQuery.data,
+    dataUpdatedAt: providerGenerationConfigsQuery.dataUpdatedAt,
+    isSuccess: providerGenerationConfigsQuery.isSuccess,
+    isError: providerGenerationConfigsQuery.isError,
+    fetchStatus: providerGenerationConfigsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const resourceGroupGenerationConfigsState = asyncViewStateFromQuery({
+    active: activeSection === "resourceGroups",
+    data: resourceGroupGenerationConfigsQuery.data,
+    dataUpdatedAt: resourceGroupGenerationConfigsQuery.dataUpdatedAt,
+    isSuccess: resourceGroupGenerationConfigsQuery.isSuccess,
+    isError: resourceGroupGenerationConfigsQuery.isError,
+    fetchStatus: resourceGroupGenerationConfigsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const textGenerationConfigsState = asyncViewStateFromQuery({
+    active: activeSection === "text",
+    data: textGenerationConfigsQuery.data,
+    dataUpdatedAt: textGenerationConfigsQuery.dataUpdatedAt,
+    isSuccess: textGenerationConfigsQuery.isSuccess,
+    isError: textGenerationConfigsQuery.isError,
+    fetchStatus: textGenerationConfigsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const imageGenerationConfigsState = asyncViewStateFromQuery({
+    active: activeSection === "image",
+    data: imageGenerationConfigsQuery.data,
+    dataUpdatedAt: imageGenerationConfigsQuery.dataUpdatedAt,
+    isSuccess: imageGenerationConfigsQuery.isSuccess,
+    isError: imageGenerationConfigsQuery.isError,
+    fetchStatus: imageGenerationConfigsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const activeSectionState = settingsSectionAsyncState(activeSection, {
+    config: configState,
+    providerProfiles: providerProfilesState,
+    generationResourceGroups: generationResourceGroupsState,
+    providerGenerationConfigs: providerGenerationConfigsState,
+    resourceGroupGenerationConfigs: resourceGroupGenerationConfigsState,
+    textGenerationConfigs: textGenerationConfigsState,
+    imageGenerationConfigs: imageGenerationConfigsState,
+  });
   const galleryEntryTagMaxSelection = Math.max(
     1,
     Math.floor(runtimeConfigQuery.data?.gallery_entry_tag_max_selection ?? 10),
@@ -608,6 +757,25 @@ export function SettingsPage() {
   const textTestReferenceAssets = textConfigTestState.draft.referenceAssetIds
     .map((assetId) => textTestReferenceAssetsQuery.data?.items.find((asset) => asset.id === assetId) ?? null)
     .filter((asset): asset is ResourceLibraryAsset => asset !== null);
+  const textTestReferenceAssetsErrorState = (
+    <AsyncErrorState
+      className="mb-3 rounded-lg border px-3 py-2 text-xs"
+      title={t("resourceLibrary.loadFailed")}
+      retryLabel={t("common.retry")}
+      retryingLabel={t("app.loading")}
+      retrying={textTestReferenceAssetsState.fetch === "fetching"}
+      onRetry={() => void textTestReferenceAssetsQuery.refetch()}
+    />
+  );
+  const textTestReferenceAssetsPausedState = (
+    <AsyncPausedState
+      className="mb-3 rounded-lg border px-3 py-2 text-xs"
+      title={t("app.requestPaused.title")}
+      message={t("app.requestPaused.message")}
+      retryLabel={t("common.retry")}
+      onRetry={() => void textTestReferenceAssetsQuery.refetch()}
+    />
+  );
 
   const resetDraftsFromConfig = useCallback((config: ConfigResponse | undefined) => {
     if (!config) {
@@ -1714,15 +1882,6 @@ export function SettingsPage() {
       : pendingGenerationArchive?.kind === "generationConfig"
         ? t("settings.generation.archive")
         : "";
-  const loadingMain =
-    (shouldLoadConfig && configQuery.isLoading) ||
-    (activeSection === "providers" && (providerProfilesQuery.isLoading || providerGenerationConfigsQuery.isLoading)) ||
-    (activeSection === "resourceGroups" &&
-      (generationResourceGroupsQuery.isLoading || resourceGroupGenerationConfigsQuery.isLoading)) ||
-    (activeSection === "text" &&
-      (providerProfilesQuery.isLoading || generationResourceGroupsQuery.isLoading || textGenerationConfigsQuery.isLoading)) ||
-    (activeSection === "image" &&
-      (providerProfilesQuery.isLoading || generationResourceGroupsQuery.isLoading || imageGenerationConfigsQuery.isLoading));
   const activeSectionError =
     activeSection === "providers"
       ? providerProfilesQuery.error ?? providerGenerationConfigsQuery.error
@@ -1836,25 +1995,54 @@ export function SettingsPage() {
                       {t(activeMeta.descriptionKey)}
                     </p>
                   </div>
-                  {loadingMain ? (
-                    <SettingsSectionLoadingState label={t("app.loading")} />
-                  ) : activeSectionError ? (
-                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-                      <p>
-                        {activeSectionError instanceof ApiError ? activeSectionError.detail : t("settings.loadFailed")}
-                      </p>
-                      <div className="mt-4">
-                        <PageActionButton
-                          type="button"
-                          onClick={retryActiveSectionLoad}
-                          preset="secondary"
-                          size="sm"
-                        >
-                          {t("common.retry")}
-                        </PageActionButton>
+                  <AsyncContent
+                    state={activeSectionState}
+                    refreshIntent="parameter-change"
+                    loadingLabel={t("app.loading")}
+                    skeleton={<SettingsSectionLoadingState label={t("app.loading")} />}
+                    initialError={(
+                      <AsyncErrorState
+                        title={t("settings.loadFailed")}
+                        message={activeSectionError instanceof ApiError ? activeSectionError.detail : undefined}
+                        retryLabel={t("common.retry")}
+                        retryingLabel={t("app.loading")}
+                        retrying={activeSectionState.fetch === "fetching"}
+                        onRetry={retryActiveSectionLoad}
+                      />
+                    )}
+                    paused={(
+                      <AsyncPausedState
+                        title={t("app.requestPaused.title")}
+                        message={t("app.requestPaused.message")}
+                        retryLabel={t("common.retry")}
+                        onRetry={retryActiveSectionLoad}
+                      />
+                    )}
+                    inactive={null}
+                    initialIdle={<SettingsSectionLoadingState label={t("app.loading")} />}
+                    empty={(
+                      <div className="rounded-lg border border-dashed pf-hairline-strong px-4 py-10 text-center text-sm pf-ink-muted">
+                        {t("settings.section.empty")}
                       </div>
-                    </div>
-                  ) : (
+                    )}
+                    refreshFeedback={
+                      activeSectionState.error === "refresh" ? (
+                        <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border-[color:var(--pf-border)] pf-surface-soft px-3 py-2 text-xs text-[color:var(--pf-accent-2)]">
+                          <span>
+                            {activeSectionError instanceof ApiError ? activeSectionError.detail : t("settings.loadFailed")}
+                          </span>
+                          <PageActionButton
+                            preset="secondary"
+                            size="sm"
+                            className="shrink-0 text-xs"
+                            onClick={retryActiveSectionLoad}
+                          >
+                            {t("common.retry")}
+                          </PageActionButton>
+                        </div>
+                      ) : null
+                    }
+                  >
                     <>
                   {shouldShowSettingsMigrationPanel(activeSection) ? (
                     <SettingsMigrationPanel
@@ -2085,7 +2273,25 @@ export function SettingsPage() {
                     ) : null}
 
                     {activeSection === "text" ? (
-                      <GenerationConfigPoolSection
+                      <>
+                        <AsyncContent
+                          state={textTestReferenceAssetsState}
+                          refreshIntent="background"
+                          loadingLabel={t("resourceLibrary.loading")}
+                          skeleton={<Skeleton className="mb-3 h-9 w-full" rounded="lg" />}
+                          initialError={textTestReferenceAssetsErrorState}
+                          paused={textTestReferenceAssetsPausedState}
+                          inactive={null}
+                          empty={null}
+                          refreshFeedback={textTestReferenceAssetsState.error === "refresh" ? (
+                            textTestReferenceAssetsErrorState
+                          ) : textTestReferenceAssetsState.fetch === "paused" ? (
+                            textTestReferenceAssetsPausedState
+                          ) : null}
+                        >
+                          {null}
+                        </AsyncContent>
+                        <GenerationConfigPoolSection
                         key="text-generation-configs"
                         purpose="text"
                         profiles={providerProfiles}
@@ -2190,7 +2396,8 @@ export function SettingsPage() {
                           void textGenerationConfigsQuery.refetch();
                         }}
                         unfreezingConfigId={unfreezingGenerationConfigId}
-                      />
+                        />
+                      </>
                     ) : null}
 
                     {activeSection === "image" ? (
@@ -2312,11 +2519,13 @@ export function SettingsPage() {
                             resettingKey={resettingKey}
                             disabled={!canWriteRuntimeSettings}
                             assets={loginPageAssetsQuery.data?.items ?? []}
-                            assetsLoading={loginPageAssetsQuery.isLoading}
-                            assetsError={loginPageAssetsQuery.isError}
+                            assetsState={loginPageAssetsState}
                             selectionSaving={saveLoginPageSelectionMutation.isPending}
                             templateConfigSaving={saveLoginPageTemplateConfigMutation.isPending}
                             workspaceSubpage={isWorkspaceSubpage}
+                            onRetryAssets={() => {
+                              void loginPageAssetsQuery.refetch();
+                            }}
                             onChange={(item, nextValue, touchedSecret) => {
                               setDrafts((current) => ({ ...current, [item.key]: nextValue }));
                               setSavedMessage("");
@@ -2383,7 +2592,7 @@ export function SettingsPage() {
                     ) : null}
                   </div>
                     </>
-                  )}
+                  </AsyncContent>
                 </div>
               </section>
             </div>
@@ -2487,6 +2696,8 @@ export function SettingsPage() {
           open={Boolean(imageConfigTestGalleryAssetId)}
           appearance={isWorkspaceSubpage ? "workspace" : "classic"}
           tags={galleryTags}
+          state={galleryTagsState}
+          onRetry={() => void galleryTagsQuery.refetch()}
           initialSelectedTagIds={[]}
           maxSelection={galleryEntryTagMaxSelection}
           required={galleryTagRequiredOnSave}

@@ -18,7 +18,6 @@ import {
   Image as ImageIcon,
   ImagePlus,
   Layers3,
-  Loader2,
   Maximize2,
   Minimize2,
   MousePointer2,
@@ -46,6 +45,9 @@ import {
   actionButtonComponentForAppearance,
   type LayoutActionAppearance,
 } from "../components/layoutActionButtons";
+import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
+import { PageLoadingSkeleton } from "../components/loading/PageLoadingSkeleton";
+import { Skeleton } from "../components/loading/Skeleton";
 import {
   getResourceBlockedActionTitle,
   isResourceBlocked,
@@ -67,6 +69,12 @@ import {
 } from "../components/workspaceInputs";
 import { ZoomableImage } from "../components/ZoomableImage";
 import { api, ApiError } from "../lib/api";
+import {
+  asyncViewPhase,
+  asyncViewStateFromQuery,
+  combineAsyncViewStates,
+  type AsyncViewState,
+} from "../lib/asyncViewState";
 import {
   generationConfigOptionsForPurpose,
   generationConfigSelectionMaxDimension,
@@ -132,6 +140,7 @@ import {
 } from "./inspiration-detail/galleryImages";
 import {
   getNodeImageDownload,
+  getNodeImageSourceAsset,
   getSourceImageDownload,
   type DownloadableImageWithResourceLibrarySource,
 } from "./inspiration-detail/imageDownloads";
@@ -398,6 +407,16 @@ export function InspirationDetailPage() {
     queryFn: () => api.getInspiration(inspirationId),
     enabled: Boolean(inspirationId),
   });
+  const inspirationViewState = asyncViewStateFromQuery({
+    active: Boolean(inspirationId),
+    data: inspirationQuery.data,
+    dataUpdatedAt: inspirationQuery.dataUpdatedAt,
+    isSuccess: inspirationQuery.isSuccess,
+    isError: inspirationQuery.isError,
+    fetchStatus: inspirationQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const inspirationViewPhase = asyncViewPhase(inspirationViewState);
   const inspirationRecord = inspirationQuery.data ?? null;
   const inspirationBlocked = isResourceBlocked(inspirationRecord);
   const inspirationAdminReadonly = isAdminViewingOtherOwner(session?.user, inspirationRecord?.owner_user_id ?? null);
@@ -458,6 +477,15 @@ export function InspirationDetailPage() {
         : false
     ),
   });
+  const workflowViewState = asyncViewStateFromQuery({
+    active: Boolean(inspirationId),
+    data: workflowQuery.data,
+    dataUpdatedAt: workflowQuery.dataUpdatedAt,
+    isSuccess: workflowQuery.isSuccess,
+    isError: workflowQuery.isError,
+    fetchStatus: workflowQuery.fetchStatus,
+    isEmpty: () => false,
+  });
   const workflow = useMemo(() => mergeActiveRunNodeStatuses(workflowQuery.data ?? null), [workflowQuery.data]);
   const workflowInitialEntryMode = workflow?.initial_entry_mode ?? "image";
   const canvasTemplatesQuery = useQuery({
@@ -486,6 +514,33 @@ export function InspirationDetailPage() {
     queryFn: () => api.listCanvasTemplateCategories({ scope: "user" }),
     enabled: shouldLoadUserTemplateCategories,
     placeholderData: keepPreviousData,
+  });
+  const canvasTemplatesState = asyncViewStateFromQuery({
+    active: Boolean(workflow && shouldLoadTemplateCatalog),
+    data: canvasTemplatesQuery.data,
+    dataUpdatedAt: canvasTemplatesQuery.dataUpdatedAt,
+    isSuccess: canvasTemplatesQuery.isSuccess,
+    isError: canvasTemplatesQuery.isError,
+    fetchStatus: canvasTemplatesQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
+  });
+  const canvasTemplateCategoriesState = asyncViewStateFromQuery({
+    active: shouldLoadTemplateCatalog,
+    data: canvasTemplateCategoriesQuery.data,
+    dataUpdatedAt: canvasTemplateCategoriesQuery.dataUpdatedAt,
+    isSuccess: canvasTemplateCategoriesQuery.isSuccess,
+    isError: canvasTemplateCategoriesQuery.isError,
+    fetchStatus: canvasTemplateCategoriesQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const userCanvasTemplateCategoriesState = asyncViewStateFromQuery({
+    active: shouldLoadUserTemplateCategories,
+    data: userCanvasTemplateCategoriesQuery.data,
+    dataUpdatedAt: userCanvasTemplateCategoriesQuery.dataUpdatedAt,
+    isSuccess: userCanvasTemplateCategoriesQuery.isSuccess,
+    isError: userCanvasTemplateCategoriesQuery.isError,
+    fetchStatus: userCanvasTemplateCategoriesQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
   });
   const workflowActive = hasActiveWorkflow(workflow);
   const workflowStatusQuery = useQuery({
@@ -2197,6 +2252,10 @@ export function InspirationDetailPage() {
     if (resourceLibraryWriteBlockedTitle) {
       return resourceLibraryWriteBlockedTitle;
     }
+    const statusDisabledTitle = resourceLibraryStatusDisabledTitle(resourceLibraryStatusStateForSource(source));
+    if (statusDisabledTitle) {
+      return statusDisabledTitle;
+    }
     const sourceResource =
       source.source_type === "poster_variant"
         ? posters.find((poster) => poster.id === source.source_id)
@@ -2218,9 +2277,12 @@ export function InspirationDetailPage() {
   }
 
   function handleSavePosterToResourceLibrary(poster: PosterVariant) {
-    if (resourceLibraryWriteBlockedTitle) {
+    const statusDisabledTitle = resourceLibraryStatusDisabledTitle(
+      resourceLibraryStatusStateForSource({ source_type: "poster_variant", source_id: poster.id, title: poster.kind }),
+    );
+    if (resourceLibraryWriteBlockedTitle || statusDisabledTitle) {
       setNotice("");
-      setError(resourceLibraryWriteBlockedTitle);
+      setError(resourceLibraryWriteBlockedTitle || statusDisabledTitle);
       return;
     }
     setResourceLibrarySaveSource({
@@ -2232,9 +2294,12 @@ export function InspirationDetailPage() {
   }
 
   function handleSaveSourceAssetToResourceLibrary(asset: SourceAsset) {
-    if (resourceLibraryWriteBlockedTitle) {
+    const statusDisabledTitle = resourceLibraryStatusDisabledTitle(
+      resourceLibraryStatusStateForSource({ source_type: "source_asset", source_id: asset.id, title: asset.kind }),
+    );
+    if (resourceLibraryWriteBlockedTitle || statusDisabledTitle) {
       setNotice("");
-      setError(resourceLibraryWriteBlockedTitle);
+      setError(resourceLibraryWriteBlockedTitle || statusDisabledTitle);
       return;
     }
     setResourceLibrarySaveSource({
@@ -2933,8 +2998,14 @@ export function InspirationDetailPage() {
     });
   }, [resourceLibraryPosterItems, resourceLibraryPosterSourceAssetIds, resourceLibraryStatusInspiration]);
   const resourceLibraryPosterIds = useMemo(
-    () => resourceLibraryPosterItems.map((poster) => poster.id),
-    [resourceLibraryPosterItems],
+    () => {
+      const posterIds = new Set(resourceLibraryPosterItems.map((poster) => poster.id));
+      if (previewResourceLibrarySource?.source_type === "poster_variant") {
+        posterIds.add(previewResourceLibrarySource.source_id);
+      }
+      return [...posterIds];
+    },
+    [previewResourceLibrarySource, resourceLibraryPosterItems],
   );
   const resourceLibraryReferenceAssetIds = useMemo(
     () => {
@@ -2944,10 +3015,27 @@ export function InspirationDetailPage() {
           assetIds.add(asset.id);
         }
       }
+      if (previewResourceLibrarySource?.source_type === "source_asset") {
+        assetIds.add(previewResourceLibrarySource.source_id);
+      }
       return [...assetIds];
     },
-    [resourceLibraryReferenceAssets, resourceLibraryStatusInspiration?.source_assets],
+    [previewResourceLibrarySource, resourceLibraryReferenceAssets, resourceLibraryStatusInspiration?.source_assets],
   );
+  const historyFallbackHasContent = resourceLibraryPosterItems.length > 0 || resourceLibraryReferenceAssets.length > 0;
+  const historyViewState = asyncViewStateFromQuery({
+    active: galleryOpen,
+    data:
+      historyQuery.data ??
+      (historyFallbackHasContent
+        ? { copy_sets: [], poster_variants: resourceLibraryPosterItems }
+        : undefined),
+    dataUpdatedAt: historyQuery.dataUpdatedAt || (historyFallbackHasContent ? inspirationQuery.dataUpdatedAt : 0),
+    isSuccess: historyQuery.isSuccess || historyFallbackHasContent,
+    isError: historyQuery.isError,
+    fetchStatus: historyQuery.fetchStatus,
+    isEmpty: (data) => data.poster_variants.length === 0 && resourceLibraryReferenceAssets.length === 0,
+  });
   const posterResourceLibraryStatusQuery = useQuery({
     queryKey: ["resource-library-source-status", "poster_variant", resourceLibraryPosterIds],
     queryFn: () =>
@@ -2968,6 +3056,79 @@ export function InspirationDetailPage() {
       }),
     enabled: resourceLibraryReferenceAssetIds.length > 0,
   });
+  const posterResourceLibraryStatusState = asyncViewStateFromQuery({
+    active:
+      resourceLibraryPosterIds.length > 0 &&
+      (galleryOpen || previewResourceLibrarySource?.source_type === "poster_variant"),
+    data: posterResourceLibraryStatusQuery.data,
+    dataUpdatedAt: posterResourceLibraryStatusQuery.dataUpdatedAt,
+    isSuccess: posterResourceLibraryStatusQuery.isSuccess,
+    isError: posterResourceLibraryStatusQuery.isError,
+    fetchStatus: posterResourceLibraryStatusQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const sourceAssetResourceLibraryStatusState = asyncViewStateFromQuery({
+    active: resourceLibraryReferenceAssetIds.length > 0,
+    data: sourceAssetResourceLibraryStatusQuery.data,
+    dataUpdatedAt: sourceAssetResourceLibraryStatusQuery.dataUpdatedAt,
+    isSuccess: sourceAssetResourceLibraryStatusQuery.isSuccess,
+    isError: sourceAssetResourceLibraryStatusQuery.isError,
+    fetchStatus: sourceAssetResourceLibraryStatusQuery.fetchStatus,
+    isEmpty: () => false,
+  });
+  const activeGalleryResourceLibraryStatusStates = [
+    posterResourceLibraryStatusState,
+    sourceAssetResourceLibraryStatusState,
+  ].filter((state) => state.participation === "active");
+  const galleryResourceLibraryStatusState: AsyncViewState = galleryOpen
+    ? activeGalleryResourceLibraryStatusStates.length
+      ? combineAsyncViewStates({
+          active: true,
+          critical: activeGalleryResourceLibraryStatusStates,
+          isEmpty: false,
+        })
+      : { participation: "active", content: "ready", fetch: "idle", error: "none" }
+    : { participation: "inactive", content: "none", fetch: "idle", error: "none" };
+
+  function resourceLibraryStatusStateForSource(source: ResourceLibrarySaveSource | null): AsyncViewState {
+    if (!source) {
+      return { participation: "inactive", content: "none", fetch: "idle", error: "none" };
+    }
+    return source.source_type === "poster_variant"
+      ? posterResourceLibraryStatusState
+      : sourceAssetResourceLibraryStatusState;
+  }
+
+  function resourceLibraryStatusDisabledTitle(state: AsyncViewState): string {
+    const phase = asyncViewPhase(state);
+    if (phase === "loading" || phase === "initial-idle") {
+      return t("app.loading");
+    }
+    if (phase === "paused") {
+      return t("app.requestPaused.title");
+    }
+    if (phase === "initial-error") {
+      return t("resourceLibrary.sourceStatusLoadFailed");
+    }
+    return "";
+  }
+
+  function retryResourceLibraryStatusForSource(source: ResourceLibrarySaveSource | null) {
+    if (source?.source_type === "poster_variant") {
+      void posterResourceLibraryStatusQuery.refetch();
+    } else if (source?.source_type === "source_asset") {
+      void sourceAssetResourceLibraryStatusQuery.refetch();
+    }
+  }
+
+  function retryGalleryResourceLibraryStatuses() {
+    if (posterResourceLibraryStatusState.participation === "active") {
+      void posterResourceLibraryStatusQuery.refetch();
+    }
+    if (sourceAssetResourceLibraryStatusState.participation === "active") {
+      void sourceAssetResourceLibraryStatusQuery.refetch();
+    }
+  }
   const savedPosterIds = useMemo(
     () =>
       new Set(
@@ -3057,19 +3218,47 @@ export function InspirationDetailPage() {
     [inspirationQuery.data, t],
   );
 
-  if (inspirationQuery.isLoading) {
+  if (inspirationViewPhase === "inactive" || inspirationViewPhase === "loading") {
     return (
-      <div className="pf-workspace flex min-h-[100dvh] items-center justify-center text-zinc-400 dark:text-slate-400">
-        <Loader2 size={24} className="animate-spin" />
+      <div className="pf-workspace min-h-[100dvh]">
+        <TopNav onHome={() => navigate("/inspirations")} />
+        <PageLoadingSkeleton profile="workbench" label={t("app.loading")} includeNavigation={false} />
       </div>
     );
   }
 
-  if (inspirationQuery.isError || !inspirationQuery.data) {
+  if (inspirationViewPhase === "paused") {
     return (
-      <div className="pf-workspace flex min-h-[100dvh] items-center justify-center">
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-200">
-          {t("detail.loadFailed")}
+      <div className="pf-workspace min-h-[100dvh]">
+        <TopNav onHome={() => navigate("/inspirations")} />
+        <div className="mx-auto max-w-3xl px-5 py-10">
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={() => {
+              void inspirationQuery.refetch();
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (inspirationViewPhase === "initial-error" || inspirationViewPhase === "initial-idle" || !inspirationQuery.data) {
+    return (
+      <div className="pf-workspace min-h-[100dvh]">
+        <TopNav onHome={() => navigate("/inspirations")} />
+        <div className="mx-auto max-w-3xl px-5 py-10">
+          <AsyncErrorState
+            title={t("detail.loadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={inspirationQuery.isFetching}
+            onRetry={() => {
+              void inspirationQuery.refetch();
+            }}
+          />
         </div>
       </div>
     );
@@ -3097,6 +3286,15 @@ export function InspirationDetailPage() {
   const posterSourceAssetIds = resourceLibraryPosterSourceAssetIds;
   const referenceAssets = resourceLibraryReferenceAssets;
   const artifactCount = posters.length + referenceAssets.length;
+  const selectedNodeSourceAsset = selectedNode ? getNodeImageSourceAsset(selectedNode, inspiration) : null;
+  const selectedNodeResourceLibraryStatusState: AsyncViewState = selectedNodeSourceAsset
+    ? sourceAssetResourceLibraryStatusState
+    : { participation: "inactive", content: "none", fetch: "idle", error: "none" };
+  const selectedNodeResourceLibrarySaveDisabledTitle =
+    resourceLibraryWriteBlockedTitle || resourceLibraryStatusDisabledTitle(selectedNodeResourceLibraryStatusState);
+  const galleryResourceLibraryWriteDisabledTitle =
+    resourceLibraryWriteBlockedTitle || resourceLibraryStatusDisabledTitle(galleryResourceLibraryStatusState);
+  const previewResourceLibraryStatusState = resourceLibraryStatusStateForSource(previewResourceLibrarySource);
   const previewResourceLibrarySaved =
     previewResourceLibrarySource?.source_type === "poster_variant"
       ? savedPosterIds.has(previewResourceLibrarySource.source_id)
@@ -3144,6 +3342,9 @@ export function InspirationDetailPage() {
   const canvasTemplates = canvasTemplatesQuery.data?.items ?? [];
   const canvasTemplateCategories: CanvasTemplateCategory[] = canvasTemplateCategoriesQuery.data?.items ?? [];
   const userCanvasTemplateCategories: CanvasTemplateCategory[] = userCanvasTemplateCategoriesQuery.data?.items ?? [];
+  const userCanvasTemplateCategoriesPhase = asyncViewPhase(userCanvasTemplateCategoriesState);
+  const userCanvasTemplateCategoriesResolved =
+    userCanvasTemplateCategoriesPhase === "empty" || userCanvasTemplateCategoriesPhase === "ready";
   const canvasTemplateSaveDisabled = workflowInitialEntryMode === "blank" || inspirationWriteBlocked || !workflow;
   const canvasTemplateHasTailNode = Boolean(workflow?.nodes.some((node) => node.node_type === "tail_splitter"));
   const userTemplateMutationBusy =
@@ -3467,7 +3668,7 @@ export function InspirationDetailPage() {
           onOpenResourceLibrary={handleOpenResourceLibrary}
           resourceLibraryDisabledTitle={resourceLibrarySelectDisabledTitle || null}
           onSaveSourceAssetToResourceLibrary={handleSaveSourceAssetToResourceLibrary}
-          resourceLibrarySaveDisabledTitle={resourceLibraryWriteBlockedTitle || null}
+          resourceLibrarySaveDisabledTitle={selectedNodeResourceLibrarySaveDisabledTitle || null}
           savedResourceLibrarySourceAssetIds={savedSourceAssetIds}
           savingResourceLibrarySourceId={resourceLibrarySaveSource?.source_id ?? null}
           onDelete={() => handleDeleteNode(selectedNode)}
@@ -3511,6 +3712,8 @@ export function InspirationDetailPage() {
       {activeSidebarTab === "runs" ? (
         <RunsPanel
           workflow={workflow}
+          workflowState={workflowViewState}
+          onRetryWorkflow={() => void workflowQuery.refetch()}
           latestRun={latestRun}
           busyRunId={workflowRunActionBusyRunId ?? null}
           failedNodeCount={failedWorkflowNodes.length}
@@ -3527,16 +3730,16 @@ export function InspirationDetailPage() {
         <TemplateGroupsPanel
           templates={canvasTemplates}
           categories={canvasTemplateCategories}
-          isLoading={canvasTemplatesQuery.isLoading}
-          isError={canvasTemplatesQuery.isError}
-          categoriesLoading={canvasTemplateCategoriesQuery.isLoading}
-          categoriesError={canvasTemplateCategoriesQuery.isError}
+          templatesState={canvasTemplatesState}
+          categoriesState={canvasTemplateCategoriesState}
           templateSearch={templateSearch}
           selectedCategoryId={templateCategoryId}
           templateScope={templateScope}
           onTemplateSearchChange={setTemplateSearch}
           onSelectedCategoryIdChange={setTemplateCategoryId}
           onTemplateScopeChange={setTemplateScope}
+          onRetryTemplates={() => void canvasTemplatesQuery.refetch()}
+          onRetryCategories={() => void canvasTemplateCategoriesQuery.refetch()}
           structureBusy={structureBusy || !workflow}
           applyBusy={applyTemplateGroupMutation.isPending}
           applyingTemplateKey={applyTemplateGroupMutation.variables?.key ?? null}
@@ -3616,6 +3819,26 @@ export function InspirationDetailPage() {
           className="pf-workspace-status-strip z-20 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-[#0b1220] sm:px-6 lg:px-8"
         />
         <ResourceBlockedNotice resource={inspiration} className="z-20 rounded-none border-x-0 border-t-0 px-4 py-2 sm:px-6 lg:px-8" />
+        {workflowViewState.content !== "none" && workflowViewState.error === "refresh" ? (
+          <AsyncErrorState
+            className="pf-async-error z-20 rounded-none border-x-0 border-t-0 px-4 py-2 text-xs sm:px-6 lg:px-8"
+            title={t("detail.workflowLoadFailed")}
+            liveRegion="off"
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={workflowViewState.fetch === "fetching"}
+            onRetry={() => void workflowQuery.refetch()}
+          />
+        ) : workflowViewState.content !== "none" && workflowViewState.fetch === "paused" ? (
+          <AsyncPausedState
+            className="pf-async-paused z-20 rounded-none border-x-0 border-t-0 px-4 py-2 text-xs sm:px-6 lg:px-8"
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            liveRegion="off"
+            retryLabel={t("common.retry")}
+            onRetry={() => void workflowQuery.refetch()}
+          />
+        ) : null}
         {activeWorkflowRun ? (
           <div className={`z-20 border-b px-4 py-2 text-xs sm:px-6 lg:px-8 ${activeWorkflowRunStatusClassName}`}>
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -3659,10 +3882,43 @@ export function InspirationDetailPage() {
                 leadingIcon={topChromeCollapsed ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
               />
             </div>
-            <WorkflowCanvas
+            <AsyncContent
+              state={workflowViewState}
+              refreshIntent="silent-poll"
+              loadingLabel={t("app.loading")}
+              className="h-full"
+              skeleton={<Skeleton className="h-full min-h-[24rem] w-full rounded-none" />}
+              initialError={(
+                <div className="flex h-full min-h-[24rem] items-center justify-center p-5">
+                  <AsyncErrorState
+                    title={t("detail.workflowLoadFailed")}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("app.loading")}
+                    retrying={workflowViewState.fetch === "fetching"}
+                    onRetry={() => void workflowQuery.refetch()}
+                    className="w-full max-w-md rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+                  />
+                </div>
+              )}
+              paused={(
+                <div className="flex h-full min-h-[24rem] items-center justify-center p-5">
+                  <AsyncPausedState
+                    title={t("app.requestPaused.title")}
+                    message={t("app.requestPaused.message")}
+                    retryLabel={t("common.retry")}
+                    onRetry={() => void workflowQuery.refetch()}
+                    className="w-full max-w-md rounded-xl border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-100"
+                  />
+                </div>
+              )}
+              inactive={<Skeleton className="h-full min-h-[24rem] w-full rounded-none" />}
+              empty={null}
+            >
+              <WorkflowCanvas
               ref={workflowCanvasRef}
               workflow={workflow}
-              isLoading={workflowQuery.isLoading}
+              isLoading={false}
+              loadingLabel={t("app.loading")}
               selectedNodeId={selectedNodeId}
               selectedNodeIds={selectedNodeIds}
               structureBusy={structureBusy}
@@ -3703,6 +3959,7 @@ export function InspirationDetailPage() {
               getNodeImage={getWorkflowCanvasNodeImage}
               onPreviewImage={handleWorkflowCanvasPreviewImage}
             />
+            </AsyncContent>
             {selectedGroupCount > 1 ? (
               <div data-canvas-control className="pointer-events-none absolute bottom-[calc(12.75rem+env(safe-area-inset-bottom))] left-3 right-3 z-30 lg:bottom-auto lg:left-1/2 lg:right-auto lg:top-4 lg:-translate-x-1/2">
                 <div className="pointer-events-auto max-h-[calc(100dvh-16rem)] overflow-y-auto rounded-xl border border-indigo-200 bg-white/95 p-2.5 text-sm font-semibold text-indigo-700 shadow-lg shadow-indigo-950/10 backdrop-blur dark:border-violet-400/50 dark:bg-[#151f33]/95 dark:text-violet-100 dark:shadow-black/30 lg:max-h-none lg:min-w-[22rem] lg:overflow-visible">
@@ -4083,6 +4340,8 @@ export function InspirationDetailPage() {
         <InspirationImagePreviewModal
           image={previewImage}
           resourceLibrarySource={previewResourceLibrarySource}
+          resourceLibraryStatusState={previewResourceLibraryStatusState}
+          onRetryResourceLibraryStatus={() => retryResourceLibraryStatusForSource(previewResourceLibrarySource)}
           resourceLibrarySaved={previewResourceLibrarySaved}
           resourceLibrarySaving={previewResourceLibrarySaving}
           resourceLibraryDisabledTitle={previewResourceLibraryDisabledTitle}
@@ -4097,6 +4356,10 @@ export function InspirationDetailPage() {
         posters={posters}
         referenceAssets={referenceAssets}
         artifactCount={artifactCount}
+        state={historyViewState}
+        onRetry={() => void historyQuery.refetch()}
+        resourceStatusState={galleryResourceLibraryStatusState}
+        onRetryResourceStatus={retryGalleryResourceLibraryStatuses}
         selectedReferenceNode={selectedReferenceNode}
         posterSourceAssetIds={posterSourceAssetIds}
         onPreviewImage={handlePreviewImage}
@@ -4116,7 +4379,7 @@ export function InspirationDetailPage() {
         savedSourceAssetIds={savedSourceAssetIds}
         fillReferenceBusy={fillReferenceBusy}
         fillBlockedTitle={inspirationWriteBlocked ? inspirationWriteBlockedTitle : null}
-        resourceLibraryWriteDisabledTitle={resourceLibraryWriteBlockedTitle}
+        resourceLibraryWriteDisabledTitle={galleryResourceLibraryWriteDisabledTitle}
         savingResourceLibrarySourceId={resourceLibrarySaveSource?.source_id ?? null}
         workspaceSubpage={workspaceSubpage}
       />
@@ -4275,17 +4538,53 @@ export function InspirationDetailPage() {
                 placeholder={t("detail.templateDescription")}
                 maxLength={1000}
               />
-              <LayoutSelectField
-                value={canvasTemplateSaveCategoryId}
-                options={[
-                  { value: "", label: t("detail.saveCanvasTemplateCategoryRequired") },
-                  ...userCanvasTemplateCategories.map((category) => ({ value: category.id, label: category.name })),
-                ]}
-                onChange={setCanvasTemplateSaveCategoryId}
-                ariaLabel={t("detail.saveCanvasTemplateCategoryRequired")}
-                disabled={userCanvasTemplateCategoriesQuery.isLoading}
-                size="tall"
-              />
+              <AsyncContent
+                state={userCanvasTemplateCategoriesState}
+                refreshIntent="background"
+                loadingLabel={t("app.loading")}
+                skeleton={<Skeleton className="h-11 w-full" />}
+                initialError={(
+                  <AsyncErrorState
+                    title={t("templateFilter.categoriesLoadFailed")}
+                    retryLabel={t("common.retry")}
+                    retryingLabel={t("app.loading")}
+                    retrying={userCanvasTemplateCategoriesState.fetch === "fetching"}
+                    onRetry={() => void userCanvasTemplateCategoriesQuery.refetch()}
+                  />
+                )}
+                paused={(
+                  <AsyncPausedState
+                    title={t("app.requestPaused.title")}
+                    message={t("app.requestPaused.message")}
+                    retryLabel={t("common.retry")}
+                    onRetry={() => void userCanvasTemplateCategoriesQuery.refetch()}
+                  />
+                )}
+                inactive={null}
+                empty={(
+                  <div className="rounded-xl border border-dashed pf-hairline-strong px-3 py-5 text-center text-xs text-slate-500 dark:text-slate-400">
+                    {t("templateManage.categoryEmpty")}
+                  </div>
+                )}
+                refreshFeedback={
+                  userCanvasTemplateCategoriesState.error === "refresh" ? (
+                    <div className="mt-2 text-xs text-red-600 dark:text-red-300">
+                      {t("templateFilter.categoriesLoadFailed")}
+                    </div>
+                  ) : null
+                }
+              >
+                <LayoutSelectField
+                  value={canvasTemplateSaveCategoryId}
+                  options={[
+                    { value: "", label: t("detail.saveCanvasTemplateCategoryRequired") },
+                    ...userCanvasTemplateCategories.map((category) => ({ value: category.id, label: category.name })),
+                  ]}
+                  onChange={setCanvasTemplateSaveCategoryId}
+                  ariaLabel={t("detail.saveCanvasTemplateCategoryRequired")}
+                  size="tall"
+                />
+              </AsyncContent>
               <LayoutCheckbox
                 checked={canvasTemplateRetainPromptText}
                 onChange={(event: ReactChangeEvent<HTMLInputElement>) =>
@@ -4314,6 +4613,7 @@ export function InspirationDetailPage() {
                 disabled={
                   createUserCanvasTemplateMutation.isPending ||
                   canvasTemplateSaveDisabled ||
+                  !userCanvasTemplateCategoriesResolved ||
                   !canvasTemplateSaveTitle.trim() ||
                   !canvasTemplateSaveCategoryId
                 }
@@ -4382,6 +4682,8 @@ export function InspirationDetailPage() {
 function InspirationImagePreviewModal({
   image,
   resourceLibrarySource,
+  resourceLibraryStatusState,
+  onRetryResourceLibraryStatus,
   resourceLibrarySaved,
   resourceLibrarySaving,
   resourceLibraryDisabledTitle,
@@ -4390,6 +4692,8 @@ function InspirationImagePreviewModal({
 }: {
   image: DownloadableImage;
   resourceLibrarySource: ResourceLibrarySaveSource | null;
+  resourceLibraryStatusState: AsyncViewState;
+  onRetryResourceLibraryStatus: () => void;
   resourceLibrarySaved: boolean;
   resourceLibrarySaving: boolean;
   resourceLibraryDisabledTitle: string;
@@ -4441,6 +4745,53 @@ function InspirationImagePreviewModal({
             />
           </div>
         </div>
+        {hasResourceLibraryAction &&
+        (resourceLibraryStatusState.error !== "none" || resourceLibraryStatusState.fetch === "fetching") ? (
+          <div className="border-b border-zinc-200 px-4 py-2 dark:border-slate-800">
+            <AsyncContent
+              state={resourceLibraryStatusState}
+              refreshIntent="background"
+              loadingLabel={t("app.loading")}
+              skeleton={<Skeleton className="h-3 w-44" />}
+              initialError={(
+                <AsyncErrorState
+                  title={t("resourceLibrary.sourceStatusLoadFailed")}
+                  retryLabel={t("common.retry")}
+                  retryingLabel={t("app.loading")}
+                  retrying={resourceLibraryStatusState.fetch === "fetching"}
+                  onRetry={onRetryResourceLibraryStatus}
+                />
+              )}
+              paused={(
+                <AsyncPausedState
+                  title={t("app.requestPaused.title")}
+                  message={t("app.requestPaused.message")}
+                  retryLabel={t("common.retry")}
+                  onRetry={onRetryResourceLibraryStatus}
+                />
+              )}
+              inactive={null}
+              empty={null}
+              refreshFeedback={
+                resourceLibraryStatusState.error === "refresh" ? (
+                  <div className="flex items-center justify-between gap-2 text-xs text-red-600 dark:text-red-300">
+                    <span>{t("resourceLibrary.sourceStatusLoadFailed")}</span>
+                    <ActionButton
+                      preset="secondary"
+                      size="sm"
+                      className="shrink-0 text-xs"
+                      onClick={onRetryResourceLibraryStatus}
+                    >
+                      {t("common.retry")}
+                    </ActionButton>
+                  </div>
+                ) : null
+              }
+            >
+              {null}
+            </AsyncContent>
+          </div>
+        ) : null}
         <ZoomableImage
           src={image.previewUrl}
           alt={image.alt}
