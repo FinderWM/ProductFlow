@@ -569,6 +569,18 @@ textarea {
   border-color: var(--pf-border);
 }
 
+.pf-async-error {
+  border-color: color-mix(in srgb, var(--pf-danger) 42%, transparent);
+  background-color: color-mix(in srgb, var(--pf-danger) 10%, var(--pf-panel));
+  color: var(--pf-danger);
+}
+
+.pf-async-paused {
+  border-color: color-mix(in srgb, var(--pf-accent-2) 42%, transparent);
+  background-color: color-mix(in srgb, var(--pf-accent-2) 10%, var(--pf-panel));
+  color: color-mix(in srgb, var(--pf-accent-2) 62%, var(--pf-text));
+}
+
 .pf-side-shell {
   width: 100%;
   max-width: 1440px;
@@ -8601,7 +8613,7 @@ textarea {
   }
 }
 
-@keyframes shimmer {
+@keyframes pf-skeleton-shimmer {
   100% {
     transform: translateX(100%);
   }
@@ -8619,18 +8631,14 @@ textarea {
   }
 }
 
-.animate-shimmer {
+.pf-skeleton {
   position: relative;
   overflow: hidden;
-  background-color: #e2e8f0;
+  background-color: color-mix(in srgb, var(--pf-panel-soft) 84%, var(--pf-border-soft));
   border-radius: var(--pf-radius-sm);
 }
 
-:root.dark .animate-shimmer {
-  background-color: #1e293b;
-}
-
-.animate-shimmer::after {
+.pf-skeleton::after {
   position: absolute;
   top: 0;
   right: 0;
@@ -8639,23 +8647,21 @@ textarea {
   transform: translateX(-100%);
   background-image: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.25) 20%,
-    rgba(255, 255, 255, 0.55) 60%,
-    rgba(255, 255, 255, 0) 100%
+    transparent 0%,
+    color-mix(in srgb, var(--pf-panel) 24%, transparent) 20%,
+    color-mix(in srgb, var(--pf-panel) 58%, transparent) 60%,
+    transparent 100%
   );
-  animation: shimmer 1.8s infinite;
+  animation: pf-skeleton-shimmer 1.8s ease-in-out 150ms infinite;
   content: '';
 }
 
-:root.dark .animate-shimmer::after {
-  background-image: linear-gradient(
-    90deg,
-    rgba(30, 41, 59, 0) 0%,
-    rgba(255, 255, 255, 0.05) 20%,
-    rgba(255, 255, 255, 0.12) 60%,
-    rgba(30, 41, 59, 0) 100%
-  );
+@media (prefers-reduced-motion: reduce) {
+  .pf-skeleton::after {
+    animation: none;
+    transform: none;
+    opacity: 0;
+  }
 }
 
 .transition-spring {
@@ -9142,20 +9148,6 @@ textarea {
   fill: var(--pf-accent) !important;
   stroke: var(--pf-accent-2) !important;
   filter: drop-shadow(0 2px 7px color-mix(in srgb, var(--pf-accent) 70%, transparent));
-}
-
-:root[data-ui-layout-scheme="workspace"] .animate-shimmer {
-  background-color: color-mix(in srgb, var(--pf-panel-soft) 82%, transparent);
-}
-
-:root[data-ui-layout-scheme="workspace"] .animate-shimmer::after {
-  background-image: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in srgb, var(--pf-panel) 24%, transparent) 20%,
-    color-mix(in srgb, var(--pf-panel) 58%, transparent) 60%,
-    transparent 100%
-  );
 }
 
 @layer theme {

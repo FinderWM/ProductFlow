@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect, useMemo, type ReactNode } from "react";
+import { lazy, useEffect, useMemo, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
-import { GlobalBrandMark, TopNav } from "./components/TopNav";
+import { GlobalBrandMark } from "./components/TopNav";
+import { AppBootstrapError, AppBootstrapSkeleton } from "./components/loading/PageLoadingSkeleton";
+import { RouteLoadingBoundary } from "./components/loading/RouteLoadingBoundary";
 import { api } from "./lib/api";
 import { CurrentWeatherProvider } from "./lib/currentWeather";
 import { NotificationProvider } from "./lib/notifications";
@@ -28,65 +29,36 @@ import { TaskNotificationBridge } from "./lib/taskNotifications";
 import { TopNavStateProvider } from "./lib/topNavState";
 import type { SessionState } from "./lib/types";
 import { UiLayoutSchemeProvider, useUiLayoutScheme } from "./lib/uiLayoutSchemePreference";
-import { SETTINGS_DEFAULT_SECTION_ID, settingsPathForSection } from "./pages/settings/sections";
+import {
+  PAGE_PATHS,
+  pageModuleLoaders,
+  prefetchPageModulesForPathname,
+  resolveNavigationTarget,
+} from "./routes/pageModules";
 
-const GalleryPage = lazy(() =>
-  import("./pages/GalleryPage").then((module) => ({ default: module.GalleryPage })),
-);
-const EnhancePage = lazy(() =>
-  import("./pages/EnhancePage").then((module) => ({ default: module.EnhancePage })),
-);
-const ImageToCodePage = lazy(() =>
-  import("./pages/ImageToCodePage").then((module) => ({ default: module.ImageToCodePage })),
-);
-const HelpPage = lazy(() =>
-  import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })),
-);
-const LoginPage = lazy(() =>
-  import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })),
-);
-const loadImageChatPage = () =>
-  import("./pages/ImageChatPage").then((module) => ({ default: module.ImageChatPage }));
-const ImageChatPage = lazy(loadImageChatPage);
-const InspirationCreatePage = lazy(() =>
-  import("./pages/InspirationCreatePage").then((module) => ({ default: module.InspirationCreatePage })),
-);
-const InspirationDetailPage = lazy(() =>
-  import("./pages/InspirationDetailPage").then((module) => ({ default: module.InspirationDetailPage })),
-);
-const loadInspirationListPage = () =>
-  import("./pages/InspirationListPage").then((module) => ({ default: module.InspirationListPage }));
-const InspirationListPage = lazy(loadInspirationListPage);
-const RbacPage = lazy(() =>
-  import("./pages/RbacPage").then((module) => ({ default: module.RbacPage })),
-);
-const ResourceLibraryPage = lazy(() =>
-  import("./pages/ResourceLibraryPage").then((module) => ({ default: module.ResourceLibraryPage })),
-);
-const SettingsPage = lazy(() =>
-  import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })),
-);
-const StatusPage = lazy(() =>
-  import("./pages/StatusPage").then((module) => ({ default: module.StatusPage })),
-);
-const TemplateManagementPage = lazy(() =>
-  import("./pages/TemplateManagementPage").then((module) => ({ default: module.TemplateManagementPage })),
-);
-const UsageStatsPage = lazy(() =>
-  import("./pages/UsageStatsPage").then((module) => ({ default: module.UsageStatsPage })),
-);
-const WorkspaceHomePage = lazy(() =>
-  import("./pages/workspace/WorkspaceLandingPages").then((module) => ({ default: module.WorkspaceHomePage })),
-);
-const WorkspaceImageChatPage = lazy(() =>
-  import("./pages/workspace/WorkspaceLandingPages").then((module) => ({ default: module.WorkspaceImageChatPage })),
-);
-const WorkspaceGalleryPage = lazy(() =>
-  import("./pages/workspace/WorkspaceLandingPages").then((module) => ({ default: module.WorkspaceGalleryPage })),
-);
-const WorkspaceStatusPage = lazy(() =>
-  import("./pages/workspace/WorkspaceLandingPages").then((module) => ({ default: module.WorkspaceStatusPage })),
-);
+const GalleryPage = lazy(pageModuleLoaders.gallery.load);
+const EnhancePage = lazy(pageModuleLoaders.enhance.load);
+const ImageToCodePage = lazy(pageModuleLoaders.imageToCode.load);
+const HelpPage = lazy(pageModuleLoaders.help.load);
+const LoginPage = lazy(pageModuleLoaders.login.load);
+const ImageChatPage = lazy(pageModuleLoaders.imageChat.load);
+const InspirationCreatePage = lazy(pageModuleLoaders.inspirationCreate.load);
+const InspirationDetailPage = lazy(pageModuleLoaders.inspirationDetail.load);
+const InspirationListPage = lazy(pageModuleLoaders.inspirationList.load);
+const RbacPage = lazy(pageModuleLoaders.rbac.load);
+const ResourceLibraryPage = lazy(pageModuleLoaders.resourceLibrary.load);
+const SettingsPage = lazy(pageModuleLoaders.settings.load);
+const StatusPage = lazy(pageModuleLoaders.status.load);
+const TemplateManagementPage = lazy(pageModuleLoaders.templateManagement.load);
+const UsageStatsPage = lazy(pageModuleLoaders.usageStats.load);
+const WorkspaceHomePage = lazy(pageModuleLoaders.workspaceHome.load);
+const WorkspaceImageChatPage = lazy(pageModuleLoaders.workspaceImageChat.load);
+const WorkspaceGalleryPage = lazy(pageModuleLoaders.workspaceGallery.load);
+const WorkspaceStatusPage = lazy(pageModuleLoaders.workspaceStatus.load);
+
+if (typeof window !== "undefined") {
+  void prefetchPageModulesForPathname(window.location.pathname);
+}
 
 const menuHomeRoutes: Array<{
   code: string;
@@ -94,35 +66,53 @@ const menuHomeRoutes: Array<{
   requiredPermission?: string;
   hasAccess?: (sessionState: SessionState | null) => boolean;
 }> = [
-  { code: "inspirations", to: "/inspirations", requiredPermission: API_INSPIRATIONS_READ },
-  { code: "resource_library", to: "/resource-library", hasAccess: (sessionState) => Boolean(sessionState?.authenticated) },
-  { code: "enhance", to: "/enhance", requiredPermission: API_ENHANCE_READ },
-  { code: "image_to_code", to: "/image-to-code", requiredPermission: API_IMAGE_TO_CODE_READ },
-  { code: "image_chat", to: "/image-chat", requiredPermission: API_IMAGE_CHAT_READ },
-  { code: "gallery", to: "/gallery", requiredPermission: API_GALLERY_READ },
-  { code: "status", to: "/status", requiredPermission: API_STATUS_READ },
-  { code: "usage_stats", to: "/usage-stats", requiredPermission: API_USAGE_STATS_READ },
-  { code: "settings", to: settingsPathForSection(SETTINGS_DEFAULT_SECTION_ID), requiredPermission: API_SETTINGS_READ },
-  { code: "rbac", to: "/rbac", hasAccess: hasRbacManagementAccess },
+  { code: "inspirations", to: resolveNavigationTarget("inspirations", "classic"), requiredPermission: API_INSPIRATIONS_READ },
+  { code: "resource_library", to: resolveNavigationTarget("resourceLibrary", "classic"), hasAccess: (sessionState) => Boolean(sessionState?.authenticated) },
+  { code: "enhance", to: resolveNavigationTarget("enhance", "classic"), requiredPermission: API_ENHANCE_READ },
+  { code: "image_to_code", to: resolveNavigationTarget("imageToCode", "classic"), requiredPermission: API_IMAGE_TO_CODE_READ },
+  { code: "image_chat", to: resolveNavigationTarget("imageChat", "classic"), requiredPermission: API_IMAGE_CHAT_READ },
+  { code: "gallery", to: resolveNavigationTarget("gallery", "classic"), requiredPermission: API_GALLERY_READ },
+  { code: "status", to: resolveNavigationTarget("status", "classic"), requiredPermission: API_STATUS_READ },
+  { code: "usage_stats", to: resolveNavigationTarget("usageStats", "classic"), requiredPermission: API_USAGE_STATS_READ },
+  { code: "settings", to: resolveNavigationTarget("settings", "classic"), requiredPermission: API_SETTINGS_READ },
+  { code: "rbac", to: resolveNavigationTarget("rbac", "classic"), hasAccess: hasRbacManagementAccess },
 ];
-
-function LoadingScreen() {
-  const { t } = useI18n();
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-white text-zinc-400 dark:bg-[#060a12] dark:text-slate-400">
-      <Loader2 size={24} className="animate-spin" />
-      <span className="sr-only">{t("app.loading")}</span>
-    </div>
-  );
-}
 
 function LayoutSchemeRoute({ classic, workspace }: { classic: ReactNode; workspace: ReactNode }) {
   const { activeScheme } = useUiLayoutScheme();
   return activeScheme === "workspace" ? workspace : classic;
 }
 
+function LayoutFallbackNotice() {
+  const { t } = useI18n();
+  const { resolutionStatus, retryDefaultScheme, isLoadingDefaultScheme } = useUiLayoutScheme();
+
+  if (resolutionStatus !== "fallback-error") {
+    return null;
+  }
+
+  return (
+    <div
+      className="relative z-[80] flex flex-wrap items-center justify-center gap-2 border-b border-amber-300/60 bg-amber-50 px-4 py-2 text-xs text-amber-950 dark:border-amber-300/25 dark:bg-amber-400/10 dark:text-amber-100"
+      role="status"
+    >
+      <span className="font-semibold">{t("app.layoutFallback.title")}</span>
+      <span>{t("app.layoutFallback.message")}</span>
+      <button
+        type="button"
+        className="rounded-md border border-current px-2 py-1 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={isLoadingDefaultScheme}
+        onClick={retryDefaultScheme}
+      >
+        {isLoadingDefaultScheme ? t("app.loading") : t("common.retry")}
+      </button>
+    </div>
+  );
+}
+
 function AppRoutes() {
+  const { t } = useI18n();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const sessionQuery = useQuery({
     queryKey: ["session"],
@@ -151,27 +141,46 @@ function AppRoutes() {
     }
     return false;
   };
-  const defaultAuthenticatedPath = menuHomeRoutes.find((route) => hasMenuRouteAccess(route.code))?.to ?? "/help";
+  const defaultAuthenticatedPath = menuHomeRoutes.find((route) => hasMenuRouteAccess(route.code))?.to ?? PAGE_PATHS.help;
 
   useEffect(() => {
-    if (!authenticated) {
+    if (sessionQuery.isPending) {
       return;
     }
-    void loadInspirationListPage();
-    void loadImageChatPage();
-  }, [authenticated]);
+    const targetPath = authenticated
+      ? location.pathname.startsWith(PAGE_PATHS.login)
+        ? defaultAuthenticatedPath
+        : location.pathname
+      : PAGE_PATHS.login;
+    void prefetchPageModulesForPathname(targetPath);
+  }, [authenticated, defaultAuthenticatedPath, location.pathname, sessionQuery.isPending]);
 
-  if (sessionQuery.isLoading) {
-    return <LoadingScreen />;
+  if (sessionQuery.isPending && sessionQuery.data === undefined) {
+    return <AppBootstrapSkeleton label={t("app.loading")} />;
+  }
+
+  if (sessionQuery.isError && sessionQuery.data === undefined) {
+    return (
+      <AppBootstrapError
+        title={t("app.sessionLoadFailed.title")}
+        message={t("app.sessionLoadFailed.message")}
+        retryLabel={t("common.retry")}
+        retryingLabel={t("app.loading")}
+        retrying={sessionQuery.isFetching}
+        onRetry={() => {
+          void sessionQuery.refetch();
+        }}
+      />
+    );
   }
 
   function authenticatedRoute(element: ReactNode): ReactNode {
-    return authenticated ? element : <Navigate to="/login" replace />;
+    return authenticated ? element : <Navigate to={PAGE_PATHS.login} replace />;
   }
 
   function menuRoute(menuCode: string, element: ReactNode): ReactNode {
     if (!authenticated) {
-      return <Navigate to="/login" replace />;
+      return <Navigate to={PAGE_PATHS.login} replace />;
     }
     if (!hasMenuRouteAccess(menuCode)) {
       return <Navigate to={defaultAuthenticatedPath} replace />;
@@ -181,7 +190,7 @@ function AppRoutes() {
 
   function permissionRoute(menuCode: string, permissionCode: string, element: ReactNode): ReactNode {
     if (!authenticated) {
-      return <Navigate to="/login" replace />;
+      return <Navigate to={PAGE_PATHS.login} replace />;
     }
     if (!hasSessionMenuApiPermission(sessionState, menuCode, permissionCode)) {
       return <Navigate to={defaultAuthenticatedPath} replace />;
@@ -195,109 +204,116 @@ function AppRoutes() {
         <TopNavStateProvider enabled={authenticated}>
           <UiLayoutSchemeProvider enabled={authenticated}>
             <CurrentWeatherProvider enabled={authenticated}>
+              <LayoutFallbackNotice />
               {authenticated ? <GlobalBrandMark to={defaultAuthenticatedPath} /> : null}
               <TaskNotificationBridge enabled={authenticated} />
-              <Suspense fallback={<LoadingScreen />}>
+              <RouteLoadingBoundary
+                loadingLabel={t("app.loading")}
+                layoutResolvingLabel={t("app.layoutResolving")}
+                chunkErrorTitle={t("app.routeChunkLoadFailed.title")}
+                chunkErrorMessage={t("app.routeChunkLoadFailed.message")}
+                reloadLabel={t("common.reload")}
+                renderErrorTitle={t("app.routeRenderFailed.title")}
+                renderErrorMessage={t("app.routeRenderFailed.message")}
+                retryLabel={t("common.retry")}
+              >
                 <Routes>
-                  <Route path="/login" element={<LoginPage authenticated={authenticated} />} />
+                  <Route path={PAGE_PATHS.login} element={<LoginPage authenticated={authenticated} />} />
                   <Route
-                    path="/login/command-orbit"
+                    path={PAGE_PATHS.loginCommandOrbit}
                     element={<LoginPage authenticated={authenticated} templateId="command-orbit" />}
                   />
                   <Route
-                    path="/login/fluid-mist"
+                    path={PAGE_PATHS.loginFluidMist}
                     element={<LoginPage authenticated={authenticated} templateId="fluid-mist" />}
                   />
                   <Route
-                    path="/login/image-lab"
+                    path={PAGE_PATHS.loginImageLab}
                     element={<LoginPage authenticated={authenticated} templateId="image-lab" />}
                   />
                   <Route
-                    path="/inspirations"
+                    path={PAGE_PATHS.inspirations}
                     element={menuRoute(
                       "inspirations",
                       <LayoutSchemeRoute classic={<InspirationListPage />} workspace={<WorkspaceHomePage />} />,
                     )}
                   />
-                  <Route path="/inspirations/list" element={menuRoute("inspirations", <InspirationListPage mode="full" />)} />
-                  <Route path="/inspirations/all" element={menuRoute("inspirations", <InspirationListPage mode="full" />)} />
+                  <Route path={PAGE_PATHS.inspirationList} element={menuRoute("inspirations", <InspirationListPage mode="full" />)} />
+                  <Route path={PAGE_PATHS.inspirationAll} element={menuRoute("inspirations", <InspirationListPage mode="full" />)} />
                   <Route
-                    path="/inspirations/new"
+                    path={PAGE_PATHS.inspirationCreate}
                     element={permissionRoute(
                       "inspirations",
                       API_INSPIRATIONS_WRITE,
-                      <>
-                        <TopNav />
-                        <InspirationCreatePage />
-                      </>,
+                      <InspirationCreatePage />,
                     )}
                   />
-                <Route path="/workflow/templates" element={menuRoute("inspirations", <TemplateManagementPage mode="personal" />)} />
+                <Route path={PAGE_PATHS.templateManagement} element={menuRoute("inspirations", <TemplateManagementPage mode="personal" />)} />
                 <Route
-                  path="/image-chat"
+                  path={PAGE_PATHS.imageChat}
                   element={menuRoute(
                     "image_chat",
                     <LayoutSchemeRoute classic={<ImageChatPage />} workspace={<WorkspaceImageChatPage />} />,
                   )}
                 />
                 <Route
-                  path="/image-chat/workbench"
+                  path={PAGE_PATHS.imageChatWorkbench}
                   element={menuRoute("image_chat", <ImageChatPage mode="workbench" />)}
                 />
-                <Route path="/resource-library" element={menuRoute("resource_library", <ResourceLibraryPage />)} />
+                <Route path={PAGE_PATHS.resourceLibrary} element={menuRoute("resource_library", <ResourceLibraryPage />)} />
                 <Route
-                  path="/resource-library/manage"
+                  path={PAGE_PATHS.resourceLibraryManage}
                   element={menuRoute("resource_library", <ResourceLibraryPage mode="manage" />)}
                 />
-                <Route path="/enhance" element={menuRoute("enhance", <EnhancePage />)} />
-                <Route path="/image-to-code" element={menuRoute("image_to_code", <ImageToCodePage />)} />
+                <Route path={PAGE_PATHS.enhance} element={menuRoute("enhance", <EnhancePage />)} />
+                <Route path={PAGE_PATHS.imageToCode} element={menuRoute("image_to_code", <ImageToCodePage />)} />
                 <Route
-                  path="/gallery"
+                  path={PAGE_PATHS.gallery}
                   element={menuRoute(
                     "gallery",
                     <LayoutSchemeRoute classic={<GalleryPage />} workspace={<WorkspaceGalleryPage />} />,
                   )}
                 />
-                <Route path="/gallery/browse" element={menuRoute("gallery", <GalleryPage mode="manage" />)} />
-                <Route path="/gallery/manage" element={menuRoute("gallery", <GalleryPage mode="manage" />)} />
-                <Route path="/help" element={authenticatedRoute(<HelpPage />)} />
+                <Route path={PAGE_PATHS.galleryBrowse} element={menuRoute("gallery", <GalleryPage mode="manage" />)} />
+                <Route path={PAGE_PATHS.galleryManage} element={menuRoute("gallery", <GalleryPage mode="manage" />)} />
+                <Route path={PAGE_PATHS.help} element={authenticatedRoute(<HelpPage />)} />
                 <Route
-                  path="/settings"
+                  path={PAGE_PATHS.settings}
                   element={menuRoute(
                     "settings",
-                    <Navigate to={settingsPathForSection(SETTINGS_DEFAULT_SECTION_ID)} replace />,
+                    <Navigate to={resolveNavigationTarget("settings", "classic")} replace />,
                   )}
                 />
                 <Route
-                  path="/settings/global-templates"
+                  path={PAGE_PATHS.settingsGlobalTemplates}
                   element={permissionRoute("settings", API_GLOBAL_TEMPLATES_MANAGE, <TemplateManagementPage mode="global" />)}
                 />
-                <Route path="/settings/:sectionSlug" element={menuRoute("settings", <SettingsPage />)} />
-                <Route path="/rbac" element={menuRoute("rbac", <RbacPage />)} />
+                <Route path={PAGE_PATHS.settingsSection} element={menuRoute("settings", <SettingsPage />)} />
+                <Route path={PAGE_PATHS.rbac} element={menuRoute("rbac", <RbacPage />)} />
                 <Route
-                  path="/status"
+                  path={PAGE_PATHS.status}
                   element={menuRoute(
                     "status",
                     <LayoutSchemeRoute classic={<StatusPage />} workspace={<WorkspaceStatusPage />} />,
                   )}
                 />
-                <Route path="/status/detail" element={menuRoute("status", <StatusPage mode="detail" />)} />
-                <Route path="/usage-stats" element={menuRoute("usage_stats", <UsageStatsPage />)} />
+                <Route path={PAGE_PATHS.statusDetail} element={menuRoute("status", <StatusPage mode="detail" />)} />
+                <Route path={PAGE_PATHS.usageStats} element={menuRoute("usage_stats", <UsageStatsPage />)} />
                 <Route
-                  path="/usage-stats/detail"
+                  path={PAGE_PATHS.usageStatsDetail}
                   element={menuRoute("usage_stats", <UsageStatsPage mode="detail" />)}
                 />
                 <Route
-                  path="/inspirations/:inspirationId/image-chat"
+                  path={PAGE_PATHS.inspirationImageChat}
                   element={menuRoute("image_chat", <ImageChatPage />)}
                 />
                 <Route
-                  path="/inspirations/:inspirationId"
+                  path={PAGE_PATHS.inspirationDetail}
                   element={menuRoute("inspirations", <InspirationDetailPage />)}
                 />
-                <Route path="*" element={<Navigate to={authenticated ? defaultAuthenticatedPath : "/login"} replace />} />
+                <Route path={PAGE_PATHS.wildcard} element={<Navigate to={authenticated ? defaultAuthenticatedPath : PAGE_PATHS.login} replace />} />
                 </Routes>
-              </Suspense>
+              </RouteLoadingBoundary>
             </CurrentWeatherProvider>
           </UiLayoutSchemeProvider>
         </TopNavStateProvider>

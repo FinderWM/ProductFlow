@@ -5,6 +5,11 @@ import type { TranslationKey } from "./i18n";
 import type { NotificationBodyLine, NotificationInput, NotificationVariant } from "./notifications";
 import { useNotifications } from "./notifications";
 import { usePreferences } from "./preferences";
+import {
+  asyncViewStateFromQuery,
+  INACTIVE_ASYNC_VIEW_STATE,
+  type AsyncViewState,
+} from "./asyncViewState";
 import type { CurrentWeather, WeatherLocation, WeatherSourceId } from "./types";
 import {
   isBadWeatherCondition,
@@ -39,6 +44,7 @@ interface CurrentWeatherContextValue {
   weatherRefreshMinutes: number;
   hasSavedLocation: boolean;
   fallbackIsDay: boolean;
+  viewState: AsyncViewState;
   isLoading: boolean;
   isRefreshingWeather: boolean;
   nextWeatherRefreshAt: number | null;
@@ -134,12 +140,14 @@ function weatherErrorKey({
   hasSavedLocation,
   locationError,
   locationLoaded,
+  manualRefreshErrorKey,
   resolvedLocation,
   weatherError,
 }: {
   hasSavedLocation: boolean;
   locationError: unknown;
   locationLoaded: boolean;
+  manualRefreshErrorKey: TranslationKey | null;
   resolvedLocation: WeatherLocation | null;
   weatherError: unknown;
 }): TranslationKey | null {
@@ -148,6 +156,9 @@ function weatherErrorKey({
   }
   if (hasSavedLocation && locationLoaded && !resolvedLocation) {
     return "weather.locationNotFound";
+  }
+  if (manualRefreshErrorKey) {
+    return manualRefreshErrorKey;
   }
   if (weatherError) {
     return "weather.loadFailed";
@@ -222,6 +233,8 @@ export function CurrentWeatherProvider({ children, enabled }: { children: ReactN
   const [weatherSettings, setWeatherSettings] = useState<WeatherSettings>(readWeatherSettings);
   const [fallbackClock, setFallbackClock] = useState(() => Date.now());
   const [nextWeatherRefreshAt, setNextWeatherRefreshAt] = useState<number | null>(null);
+  const [manualRefreshPending, setManualRefreshPending] = useState(false);
+  const [manualRefreshErrorKey, setManualRefreshErrorKey] = useState<TranslationKey | null>(null);
   const notifiedWeatherKeysRef = useRef<Set<string>>(new Set());
   const startupWeatherNotificationSentRef = useRef(false);
   const manualRefreshNotificationSeqRef = useRef(0);
@@ -258,6 +271,15 @@ export function CurrentWeatherProvider({ children, enabled }: { children: ReactN
     retry: false,
     staleTime: weatherRefreshMs,
     gcTime: weatherRefreshMs,
+  });
+  const locationViewState = asyncViewStateFromQuery({
+    active: enabled && hasSavedLocation && locationNeedsLookup,
+    data: locationQueryResult.data,
+    dataUpdatedAt: locationQueryResult.dataUpdatedAt,
+    isSuccess: locationQueryResult.isSuccess,
+    isError: locationQueryResult.isError,
+    fetchStatus: locationQueryResult.fetchStatus,
+    isEmpty: (data) => data === null,
   });
   const resolvedLocation = locationNeedsLookup ? (locationQueryResult.data ?? null) : savedLocation.location;
 
@@ -336,6 +358,28 @@ export function CurrentWeatherProvider({ children, enabled }: { children: ReactN
     staleTime: weatherRefreshMs,
   });
   const weatherQueryEnabled = enabled && Boolean(resolvedLocation);
+  const weatherQueryViewState = asyncViewStateFromQuery({
+    active: enabled && hasSavedLocation && !locationNeedsLookup && Boolean(resolvedLocation),
+    data: weatherQuery.data,
+    dataUpdatedAt: weatherQuery.dataUpdatedAt,
+    isSuccess: weatherQuery.isSuccess,
+    isError: weatherQuery.isError,
+    fetchStatus: weatherQuery.fetchStatus,
+    isEmpty: (data) => data === null,
+  });
+  const activeWaitingState: AsyncViewState = {
+    participation: "active",
+    content: "none",
+    fetch: "idle",
+    error: "none",
+  };
+  const viewState = !enabled || !hasSavedLocation
+    ? INACTIVE_ASYNC_VIEW_STATE
+    : locationNeedsLookup
+      ? locationViewState
+        : resolvedLocation
+          ? weatherQueryViewState
+          : activeWaitingState;
   const weatherRefetchRef = useRef(weatherQuery.refetch);
 
   useEffect(() => {
@@ -362,6 +406,12 @@ export function CurrentWeatherProvider({ children, enabled }: { children: ReactN
     }
     pendingSourceSwitchWeatherKeyRef.current = null;
   }, [weatherQuery.data]);
+
+  useEffect(() => {
+    if (weatherQuery.isSuccess && weatherQuery.dataUpdatedAt > 0) {
+      setManualRefreshErrorKey(null);
+    }
+  }, [weatherQuery.dataUpdatedAt, weatherQuery.isSuccess]);
 
   useEffect(() => {
     const alertKey = pendingSourceSwitchWeatherKeyRef.current;
@@ -441,36 +491,49 @@ export function CurrentWeatherProvider({ children, enabled }: { children: ReactN
     } satisfies SavedWeatherLocation;
     writeSavedWeatherLocation(nextSavedLocation);
     setSavedLocation(nextSavedLocation);
+    setManualRefreshErrorKey(null);
   }, [weatherSettings.sourceId]);
   const clearWeatherLocation = useCallback(() => {
     const nextSavedLocation = { sourceId: null, query: "", location: null } satisfies SavedWeatherLocation;
     writeSavedWeatherLocation(nextSavedLocation);
     setSavedLocation(nextSavedLocation);
+    setManualRefreshErrorKey(null);
   }, []);
   const refreshWeather = useCallback(async () => {
     if (!resolvedLocation) {
       return;
     }
-    const result = await weatherRefetchRef.current();
-    const weather = result.data ?? weatherQuery.data ?? null;
-    if (!weather) {
-      return;
+    setManualRefreshPending(true);
+    setManualRefreshErrorKey(null);
+    try {
+      const result = await weatherRefetchRef.current();
+      if (result.error) {
+        setManualRefreshErrorKey("weather.loadFailed");
+        return;
+      }
+      const weather = result.data ?? weatherQuery.data ?? null;
+      if (!weather) {
+        setManualRefreshErrorKey("weather.loadFailed");
+        return;
+      }
+      const weatherKey = weatherAlertKey(weatherSettings.sourceId, resolvedLocation, weather);
+      if (isBadWeatherCondition(weather.condition)) {
+        notifiedWeatherKeysRef.current.add(weatherKey);
+      }
+      manualRefreshNotificationSeqRef.current += 1;
+      notify({
+        ...buildCurrentWeatherNotification({
+          location: resolvedLocation,
+          locationQuery,
+          reason: "latest",
+          t,
+          weather,
+        }),
+        dedupeKey: `weather-manual:${weatherKey}:${manualRefreshNotificationSeqRef.current}`,
+      });
+    } finally {
+      setManualRefreshPending(false);
     }
-    const weatherKey = weatherAlertKey(weatherSettings.sourceId, resolvedLocation, weather);
-    if (isBadWeatherCondition(weather.condition)) {
-      notifiedWeatherKeysRef.current.add(weatherKey);
-    }
-    manualRefreshNotificationSeqRef.current += 1;
-    notify({
-      ...buildCurrentWeatherNotification({
-        location: resolvedLocation,
-        locationQuery,
-        reason: "latest",
-        t,
-        weather,
-      }),
-      dedupeKey: `weather-manual:${weatherKey}:${manualRefreshNotificationSeqRef.current}`,
-    });
   }, [locationQuery, notify, resolvedLocation, t, weatherQuery.data, weatherSettings.sourceId]);
   const value = useMemo<CurrentWeatherContextValue>(
     () => ({
@@ -481,13 +544,15 @@ export function CurrentWeatherProvider({ children, enabled }: { children: ReactN
       weatherRefreshMinutes: weatherSettings.refreshMinutes,
       hasSavedLocation,
       fallbackIsDay: isLocalDaytime(new Date(fallbackClock)),
-      isLoading: locationQueryResult.isLoading || weatherQuery.isLoading,
-      isRefreshingWeather: weatherQuery.isFetching,
+      viewState,
+      isLoading: viewState.content === "none" && viewState.fetch === "fetching",
+      isRefreshingWeather: manualRefreshPending,
       nextWeatherRefreshAt,
       errorKey: weatherErrorKey({
         hasSavedLocation,
         locationError: locationQueryResult.error,
         locationLoaded: locationQueryResult.isSuccess,
+        manualRefreshErrorKey,
         resolvedLocation,
         weatherError: weatherQuery.error,
       }),
@@ -501,18 +566,18 @@ export function CurrentWeatherProvider({ children, enabled }: { children: ReactN
       hasSavedLocation,
       nextWeatherRefreshAt,
       locationQueryResult.error,
-      locationQueryResult.isLoading,
       locationQueryResult.isSuccess,
+      manualRefreshErrorKey,
+      manualRefreshPending,
       refreshWeather,
       resolvedLocation,
       savedLocationQuery,
       setWeatherLocation,
+      viewState,
       weatherSettings.refreshMinutes,
       weatherSettings.sourceId,
       weatherQuery.data,
       weatherQuery.error,
-      weatherQuery.isFetching,
-      weatherQuery.isLoading,
     ],
   );
 
@@ -532,6 +597,7 @@ export function useCurrentWeather() {
     weatherRefreshMinutes: 15,
     hasSavedLocation: false,
     fallbackIsDay: isLocalDaytime(),
+    viewState: INACTIVE_ASYNC_VIEW_STATE,
     isLoading: false,
     isRefreshingWeather: false,
     nextWeatherRefreshAt: null,

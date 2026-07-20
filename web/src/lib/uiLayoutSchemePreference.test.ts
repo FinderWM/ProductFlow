@@ -5,6 +5,7 @@ import {
   mergeUiLayoutSchemePreference,
   resolveActiveSchemeAfterDefaultSaveError,
   resolveActiveSchemeFromDefaultLoad,
+  resolveUiLayoutSchemeResolutionStatus,
 } from "./uiLayoutSchemePreference";
 
 describe("ui layout scheme preference helpers", () => {
@@ -101,5 +102,40 @@ describe("ui layout scheme preference helpers", () => {
         previousActiveScheme: "classic",
       }),
     ).toBe("classic");
+  });
+
+  it("keeps scheme routes gated until preference resolution reaches a terminal state", () => {
+    expect(
+      resolveUiLayoutSchemeResolutionStatus({
+        enabled: true,
+        initializedFromDefault: false,
+        hasPreferencesData: false,
+        hasInitialError: false,
+      }),
+    ).toBe("resolving");
+    expect(
+      resolveUiLayoutSchemeResolutionStatus({
+        enabled: true,
+        initializedFromDefault: false,
+        hasPreferencesData: false,
+        hasInitialError: true,
+      }),
+    ).toBe("fallback-error");
+    expect(
+      resolveUiLayoutSchemeResolutionStatus({
+        enabled: true,
+        initializedFromDefault: true,
+        hasPreferencesData: true,
+        hasInitialError: false,
+      }),
+    ).toBe("resolved");
+    expect(
+      resolveUiLayoutSchemeResolutionStatus({
+        enabled: false,
+        initializedFromDefault: false,
+        hasPreferencesData: false,
+        hasInitialError: false,
+      }),
+    ).toBe("disabled");
   });
 });

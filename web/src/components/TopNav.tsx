@@ -59,7 +59,6 @@ import {
 import { useSessionActions } from "../lib/sessionActions";
 import { useSessionState } from "../lib/session";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
-import { SETTINGS_DEFAULT_SECTION_ID, isSettingsSectionPathname, settingsPathForSection } from "../pages/settings/sections";
 import { useTopNavState } from "../lib/topNavState";
 import { UI_LAYOUT_SCHEME_METADATA, type UiLayoutScheme } from "../lib/uiLayoutScheme";
 import type { CurrentWeather, CurrentWeatherCondition, SessionState, SessionUser } from "../lib/types";
@@ -76,6 +75,14 @@ import {
   weatherLocationDisplayName,
 } from "../lib/weather";
 import { searchWeatherLocations, weatherSources } from "../lib/weatherSources";
+import {
+  isNavigationRouteActive,
+  matchPageRoute,
+  prefetchNavigationRoute,
+  prefetchPageModulesForPathname,
+  resolveNavigationTarget,
+  type NavigationRouteId,
+} from "../routes/pageModules";
 
 interface TopNavProps {
   /** Kept for page compatibility; global top nav no longer renders repeated page titles. */
@@ -87,15 +94,13 @@ interface TopNavProps {
 type NavPriority = "primary" | "secondary";
 
 interface TopNavItem {
+  routeId: NavigationRouteId;
   labelKey: TranslationKey;
-  to: string;
-  workspaceTo?: string;
   menuCode: string | null;
   requiredPermission?: string;
   hasAccess?: (session: SessionState | null) => boolean;
   priority: NavPriority;
   icon: typeof Activity;
-  match: (pathname: string) => boolean;
 }
 
 interface AccountIdentity {
@@ -142,11 +147,6 @@ export interface WorkspaceThemeDockRect {
   bottom: number;
 }
 
-export interface WorkspaceTopNavTargetInput {
-  to: string;
-  workspaceTo?: string;
-}
-
 export interface DesktopMoreMenuState {
   open: boolean;
   pinned: boolean;
@@ -176,130 +176,106 @@ const TOP_CHROME_OPEN_HEIGHT_CLASS = "h-[4.5rem] md:h-[4.65rem]";
 
 const navItems: TopNavItem[] = [
   {
+    routeId: "inspirations",
     labelKey: "nav.inspirations",
-    to: "/inspirations",
-    workspaceTo: "/inspirations/list",
     menuCode: "inspirations",
     requiredPermission: API_INSPIRATIONS_READ,
     priority: "primary",
     icon: Flower2,
-    match: (pathname: string) =>
-      pathname === "/inspirations" ||
-      pathname === "/inspirations/list" ||
-      pathname === "/inspirations/all" ||
-      pathname === "/inspirations/new" ||
-      (pathname.startsWith("/inspirations/") && !pathname.includes("/image-chat")),
   },
   {
+    routeId: "templates",
     labelKey: "nav.templates",
-    to: "/workflow/templates",
     menuCode: "inspirations",
     requiredPermission: API_INSPIRATIONS_READ,
     priority: "secondary",
     icon: LayoutDashboard,
-    match: (pathname: string) => pathname.startsWith("/workflow/templates"),
   },
   {
+    routeId: "imageChat",
     labelKey: "nav.imageChat",
-    to: "/image-chat",
-    workspaceTo: "/image-chat/workbench",
     menuCode: "image_chat",
     requiredPermission: API_IMAGE_CHAT_READ,
     priority: "primary",
     icon: Leaf,
-    match: (pathname: string) => pathname.includes("image-chat"),
   },
   {
+    routeId: "resourceLibrary",
     labelKey: "nav.resourceLibrary",
-    to: "/resource-library",
-    workspaceTo: "/resource-library/manage",
     menuCode: null,
     priority: "primary",
     icon: Trees,
-    match: (pathname: string) => pathname.startsWith("/resource-library"),
   },
   {
+    routeId: "gallery",
     labelKey: "nav.gallery",
-    to: "/gallery",
-    workspaceTo: "/gallery/manage",
     menuCode: "gallery",
     requiredPermission: API_GALLERY_READ,
     priority: "primary",
     icon: Rose,
-    match: (pathname: string) => pathname.startsWith("/gallery"),
   },
   {
+    routeId: "enhance",
     labelKey: "nav.enhance",
-    to: "/enhance",
     menuCode: "enhance",
     requiredPermission: API_ENHANCE_READ,
     priority: "primary",
     icon: Sparkles,
-    match: (pathname: string) => pathname.startsWith("/enhance"),
   },
   {
+    routeId: "imageToCode",
     labelKey: "nav.imageToCode",
-    to: "/image-to-code",
     menuCode: "image_to_code",
     requiredPermission: API_IMAGE_TO_CODE_READ,
     priority: "primary",
     icon: Code2,
-    match: (pathname: string) => pathname.startsWith("/image-to-code"),
   },
   {
+    routeId: "status",
     labelKey: "nav.status",
-    to: "/status",
-    workspaceTo: "/status/detail",
     menuCode: "status",
     requiredPermission: API_STATUS_READ,
     priority: "primary",
     icon: Activity,
-    match: (pathname: string) => pathname.startsWith("/status"),
   },
   {
+    routeId: "usageStats",
     labelKey: "nav.usageStats",
-    to: "/usage-stats",
-    workspaceTo: "/usage-stats/detail",
     menuCode: "usage_stats",
     requiredPermission: API_USAGE_STATS_READ,
     priority: "primary",
     icon: BarChart3,
-    match: (pathname: string) => pathname.startsWith("/usage-stats"),
   },
   {
+    routeId: "settings",
     labelKey: "nav.settings",
-    to: settingsPathForSection(SETTINGS_DEFAULT_SECTION_ID),
     menuCode: "settings",
     requiredPermission: API_SETTINGS_READ,
     priority: "primary",
     icon: Settings,
-    match: isSettingsSectionPathname,
   },
   {
+    routeId: "globalTemplates",
     labelKey: "nav.globalTemplates",
-    to: "/settings/global-templates",
     menuCode: "settings",
     requiredPermission: API_GLOBAL_TEMPLATES_MANAGE,
     priority: "secondary",
     icon: Monitor,
-    match: (pathname: string) => pathname.startsWith("/settings/global-templates"),
   },
   {
+    routeId: "rbac",
     labelKey: "nav.rbac",
-    to: "/rbac",
     menuCode: "rbac",
     hasAccess: hasRbacManagementAccess,
     priority: "secondary",
     icon: ShieldCheck,
-    match: (pathname: string) => pathname.startsWith("/rbac"),
   },
   {
+    routeId: "help",
     labelKey: "nav.help",
-    to: "/help",
     menuCode: null,
     priority: "secondary",
     icon: BookOpen,
-    match: (pathname: string) => pathname.startsWith("/help"),
   },
 ];
 
@@ -539,6 +515,18 @@ function weatherIconFor(weather: CurrentWeather | null, fallbackIsDay: boolean):
   return weatherConditionIcons[weather.condition];
 }
 
+export function shouldShowWeatherTriggerLoading({
+  hasSavedLocation,
+  isLoading,
+  weather,
+}: {
+  hasSavedLocation: boolean;
+  isLoading: boolean;
+  weather: CurrentWeather | null;
+}): boolean {
+  return hasSavedLocation && isLoading && weather === null;
+}
+
 const localeLabelKey: Record<Locale, TranslationKey> = {
   "zh-CN": "locale.zhCN",
   "en-US": "locale.enUS",
@@ -565,8 +553,6 @@ const workspaceMoreOrder: TranslationKey[] = [
   "nav.globalTemplates",
 ];
 
-const WORKSPACE_HOME_PATH = "/inspirations";
-
 function workspaceActionLabel(locale: Locale): string {
   if (locale === "en-US") {
     return "Actions";
@@ -584,10 +570,6 @@ function workspaceOrderedItems(items: TopNavItem[]): TopNavItem[] {
     const rightIndex = order.get(right.labelKey) ?? Number.MAX_SAFE_INTEGER;
     return leftIndex - rightIndex;
   });
-}
-
-export function workspaceTopNavTarget(item: WorkspaceTopNavTargetInput): string {
-  return item.workspaceTo ?? item.to;
 }
 
 export function nextDesktopMoreMenuState(
@@ -615,14 +597,11 @@ export function shouldCloseDesktopMoreOnBlur({
 }
 
 export function shouldSuppressTopNavSelection(pathname: string, activeScheme: UiLayoutScheme): boolean {
-  return activeScheme === "workspace" && pathname === WORKSPACE_HOME_PATH;
+  return activeScheme === "workspace" && Boolean(matchPageRoute(pathname).suppressWorkspaceNavSelection);
 }
 
 function isTopNavItemActive(item: TopNavItem, pathname: string, activeScheme: UiLayoutScheme): boolean {
-  if (shouldSuppressTopNavSelection(pathname, activeScheme)) {
-    return false;
-  }
-  return item.match(pathname);
+  return isNavigationRouteActive(item.routeId, pathname, activeScheme);
 }
 
 function navItemClassName(active: boolean) {
@@ -1209,7 +1188,8 @@ function WeatherControl({ appearance }: { appearance: LayoutActionAppearance }) 
     staleTime: 5 * 60 * 1000,
   });
   const WeatherIcon = weatherIconFor(weatherState.weather, weatherState.fallbackIsDay);
-  const TriggerIcon = weatherState.isLoading && weatherState.hasSavedLocation ? Loader2 : WeatherIcon;
+  const showTriggerLoading = shouldShowWeatherTriggerLoading(weatherState);
+  const TriggerIcon = showTriggerLoading ? Loader2 : WeatherIcon;
   const baseTriggerLabel = weatherTitle({
     fallbackIsDay: weatherState.fallbackIsDay,
     hasSavedLocation: weatherState.hasSavedLocation,
@@ -1314,7 +1294,7 @@ function WeatherControl({ appearance }: { appearance: LayoutActionAppearance }) 
         <TriggerIcon
           size={17}
           aria-hidden="true"
-          className={TriggerIcon === Loader2 ? "animate-spin" : undefined}
+          className={showTriggerLoading ? "animate-spin" : undefined}
         />
       </button>
       <FloatingSurface
@@ -1623,8 +1603,8 @@ export function TopNav({ onLogout }: TopNavProps) {
   const primaryNavItems = visibleNavItems.filter((item) => item.priority === "primary");
   const secondaryNavItems = visibleNavItems.filter((item) => item.priority === "secondary");
   const workspaceOverflowKeySet = useMemo(() => new Set(workspaceOverflowKeys), [workspaceOverflowKeys]);
-  const workspaceVisiblePrimaryNavItems = primaryNavItems.filter((item) => !workspaceOverflowKeySet.has(item.to));
-  const workspaceCollapsedPrimaryNavItems = primaryNavItems.filter((item) => workspaceOverflowKeySet.has(item.to));
+  const workspaceVisiblePrimaryNavItems = primaryNavItems.filter((item) => !workspaceOverflowKeySet.has(item.routeId));
+  const workspaceCollapsedPrimaryNavItems = primaryNavItems.filter((item) => workspaceOverflowKeySet.has(item.routeId));
   const workspaceMoreNavItems = [
     ...workspaceCollapsedPrimaryNavItems.slice().reverse(),
     ...workspaceOrderedItems(secondaryNavItems),
@@ -1639,8 +1619,8 @@ export function TopNav({ onLogout }: TopNavProps) {
   const mobileOverflowPrimaryNavItems = primaryNavItems.slice(4);
   const mobileNavColumnCount = mobileVisiblePrimaryNavItems.length + (hasOverflowNav ? 1 : 0);
   const desktopOverflowKeySet = useMemo(() => new Set(desktopOverflowKeys), [desktopOverflowKeys]);
-  const desktopVisibleNavItems = visibleNavItems.filter((item) => !desktopOverflowKeySet.has(item.to));
-  const desktopOverflowNavItems = visibleNavItems.filter((item) => desktopOverflowKeySet.has(item.to));
+  const desktopVisibleNavItems = visibleNavItems.filter((item) => !desktopOverflowKeySet.has(item.routeId));
+  const desktopOverflowNavItems = visibleNavItems.filter((item) => desktopOverflowKeySet.has(item.routeId));
   const desktopOverflowActive = desktopOverflowNavItems.some(isNavItemActive);
   const account = accountIdentity(session?.user, t("nav.account"));
   const workspaceWeatherLocationName =
@@ -1824,10 +1804,10 @@ export function TopNav({ onLogout }: TopNavProps) {
     }
 
     const layoutItems = visibleNavItems.map((item) => ({
-      key: item.to,
+      key: item.routeId,
       priority: item.priority,
       active: isNavItemActive(item),
-      width: desktopMeasureItemRefs.current[item.to]?.getBoundingClientRect().width ?? 0,
+      width: desktopMeasureItemRefs.current[item.routeId]?.getBoundingClientRect().width ?? 0,
     }));
     const moreButtonWidth = moreMeasure.getBoundingClientRect().width;
     const rightControls = desktopRightControlsRef.current;
@@ -1882,9 +1862,9 @@ export function TopNav({ onLogout }: TopNavProps) {
     ];
 
     const layoutItems = visibleNavItems.map((item) => ({
-      key: item.to,
+      key: item.routeId,
       priority: item.priority,
-      width: workspaceMeasureItemRefs.current[item.to]?.getBoundingClientRect().width ?? 0,
+      width: workspaceMeasureItemRefs.current[item.routeId]?.getBoundingClientRect().width ?? 0,
     }));
     if (
       layoutItems.some((item) => item.width <= 0) ||
@@ -2190,18 +2170,26 @@ export function TopNav({ onLogout }: TopNavProps) {
     </>
   );
 
+  const navTarget = (item: TopNavItem) => resolveNavigationTarget(item.routeId, activeScheme);
+  const prefetchNavItem = (item: TopNavItem) => {
+    void prefetchNavigationRoute(item.routeId, activeScheme);
+  };
+
   const renderDesktopNavItem = (item: TopNavItem) => {
     const Icon = item.icon;
     const active = isNavItemActive(item);
     const label = t(item.labelKey);
     return (
       <Link
-        key={item.to}
-        to={item.to}
+        key={item.routeId}
+        to={navTarget(item)}
         aria-current={active ? "page" : undefined}
         aria-label={label}
         className={navItemClassName(active)}
         title={label}
+        onPointerEnter={() => prefetchNavItem(item)}
+        onFocus={() => prefetchNavItem(item)}
+        onTouchStart={() => prefetchNavItem(item)}
       >
         <Icon size={16} />
         <span className="inline">{label}</span>
@@ -2214,9 +2202,9 @@ export function TopNav({ onLogout }: TopNavProps) {
     const label = t(item.labelKey);
     return (
       <span
-        key={item.to}
+        key={item.routeId}
         ref={(node) => {
-          desktopMeasureItemRefs.current[item.to] = node;
+          desktopMeasureItemRefs.current[item.routeId] = node;
         }}
         className={navItemClassName(false)}
       >
@@ -2231,10 +2219,13 @@ export function TopNav({ onLogout }: TopNavProps) {
     const label = t(item.labelKey);
     return (
       <Link
-        key={item.to}
-        to={workspaceTopNavTarget(item)}
+        key={item.routeId}
+        to={navTarget(item)}
         aria-current={active ? "page" : undefined}
         className="pf-shell-concept-link"
+        onPointerEnter={() => prefetchNavItem(item)}
+        onFocus={() => prefetchNavItem(item)}
+        onTouchStart={() => prefetchNavItem(item)}
       >
         {label}
       </Link>
@@ -2245,9 +2236,9 @@ export function TopNav({ onLogout }: TopNavProps) {
     const label = t(item.labelKey);
     return (
       <span
-        key={item.to}
+        key={item.routeId}
         ref={(node) => {
-          workspaceMeasureItemRefs.current[item.to] = node;
+          workspaceMeasureItemRefs.current[item.routeId] = node;
         }}
         className="pf-shell-concept-link"
       >
@@ -2261,11 +2252,14 @@ export function TopNav({ onLogout }: TopNavProps) {
     const label = t(item.labelKey);
     return (
       <Link
-        key={item.to}
-        to={workspaceTopNavTarget(item)}
+        key={item.routeId}
+        to={navTarget(item)}
         role="menuitem"
         aria-current={active ? "page" : undefined}
         className="pf-shell-more-item"
+        onPointerEnter={() => prefetchNavItem(item)}
+        onFocus={() => prefetchNavItem(item)}
+        onTouchStart={() => prefetchNavItem(item)}
         onClick={() => {
           clearDesktopMoreCloseTimer();
           closeDesktopMoreMenu();
@@ -2282,10 +2276,13 @@ export function TopNav({ onLogout }: TopNavProps) {
     const label = t(item.labelKey);
     return (
       <Link
-        key={item.to}
-        to={workspaceTopNavTarget(item)}
+        key={item.routeId}
+        to={navTarget(item)}
         aria-current={active ? "page" : undefined}
         className={className}
+        onPointerEnter={() => prefetchNavItem(item)}
+        onFocus={() => prefetchNavItem(item)}
+        onTouchStart={() => prefetchNavItem(item)}
         onClick={() => setMobileMoreOpen(false)}
       >
         {label}
@@ -2340,7 +2337,16 @@ export function TopNav({ onLogout }: TopNavProps) {
   const renderWorkspaceBrandChip = (containerRef?: Ref<HTMLDivElement>) => (
     <div ref={containerRef} className="pf-shell-brand-chip">
       <WeatherControl appearance="workspace" />
-      <Link to={WORKSPACE_HOME_PATH} aria-label="Inspiration One">
+      <Link
+        to={resolveNavigationTarget("inspirations", "classic")}
+        aria-label="Inspiration One"
+        onPointerEnter={() => {
+          void prefetchPageModulesForPathname(resolveNavigationTarget("inspirations", "classic"), "workspace");
+        }}
+        onFocus={() => {
+          void prefetchPageModulesForPathname(resolveNavigationTarget("inspirations", "classic"), "workspace");
+        }}
+      >
         <span>
           Inspiration One
           <small>{workspaceBrandWeatherSummary}</small>
@@ -2712,11 +2718,14 @@ export function TopNav({ onLogout }: TopNavProps) {
                             const label = t(item.labelKey);
                             return (
                               <Link
-                                key={item.to}
-                                to={item.to}
+                                key={item.routeId}
+                                to={navTarget(item)}
                                 role="menuitem"
                                 aria-current={active ? "page" : undefined}
                                 className={menuItemClassName(active)}
+                                onPointerEnter={() => prefetchNavItem(item)}
+                                onFocus={() => prefetchNavItem(item)}
+                                onTouchStart={() => prefetchNavItem(item)}
                                 onClick={() => {
                                   clearDesktopMoreCloseTimer();
                                   closeDesktopMoreMenu();
@@ -2790,11 +2799,14 @@ export function TopNav({ onLogout }: TopNavProps) {
               const label = t(item.labelKey);
               return (
                 <Link
-                  key={item.to}
-                  to={item.to}
+                  key={item.routeId}
+                  to={navTarget(item)}
                   role="menuitem"
                   aria-current={active ? "page" : undefined}
                   className={mobileMoreMenuItemClassName(active)}
+                  onPointerEnter={() => prefetchNavItem(item)}
+                  onFocus={() => prefetchNavItem(item)}
+                  onTouchStart={() => prefetchNavItem(item)}
                   onClick={() => setMobileMoreOpen(false)}
                 >
                   <Icon size={17} aria-hidden="true" />
@@ -2808,11 +2820,14 @@ export function TopNav({ onLogout }: TopNavProps) {
               const label = t(item.labelKey);
               return (
                 <Link
-                  key={item.to}
-                  to={item.to}
+                  key={item.routeId}
+                  to={navTarget(item)}
                   role="menuitem"
                   aria-current={active ? "page" : undefined}
                   className={mobileMoreMenuItemClassName(active)}
+                  onPointerEnter={() => prefetchNavItem(item)}
+                  onFocus={() => prefetchNavItem(item)}
+                  onTouchStart={() => prefetchNavItem(item)}
                   onClick={() => setMobileMoreOpen(false)}
                 >
                   <Icon size={17} aria-hidden="true" />
@@ -2867,11 +2882,14 @@ export function TopNav({ onLogout }: TopNavProps) {
             const label = t(item.labelKey);
             return (
               <Link
-                key={item.to}
-                to={item.to}
+                key={item.routeId}
+                to={navTarget(item)}
                 aria-current={active ? "page" : undefined}
                 aria-label={label}
                 className={mobileNavItemClassName(active)}
+                onPointerEnter={() => prefetchNavItem(item)}
+                onFocus={() => prefetchNavItem(item)}
+                onTouchStart={() => prefetchNavItem(item)}
               >
                 <Icon size={18} aria-hidden="true" />
                 <span className="mt-0.5 truncate">{label}</span>

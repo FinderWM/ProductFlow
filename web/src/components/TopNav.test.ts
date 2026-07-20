@@ -8,9 +8,9 @@ import {
   getWorkspaceNavLayout,
   isPointerInWorkspaceThemeDockRevealZone,
   nextDesktopMoreMenuState,
+  shouldShowWeatherTriggerLoading,
   shouldSuppressTopNavSelection,
   shouldCloseDesktopMoreOnBlur,
-  workspaceTopNavTarget,
   type DesktopNavLayoutInput,
   type WorkspaceThemeDockRect,
   type WorkspaceNavLayoutInput,
@@ -224,22 +224,26 @@ describe("getWorkspaceHomeLeadingSpace", () => {
   });
 });
 
-describe("workspaceTopNavTarget", () => {
-  it("uses the workspace-specific business route when provided", () => {
-    expect(workspaceTopNavTarget({ to: "/image-chat", workspaceTo: "/image-chat/workbench" })).toBe(
-      "/image-chat/workbench",
-    );
-    expect(workspaceTopNavTarget({ to: "/resource-library", workspaceTo: "/resource-library/manage" })).toBe(
-      "/resource-library/manage",
-    );
-    expect(workspaceTopNavTarget({ to: "/gallery", workspaceTo: "/gallery/manage" })).toBe("/gallery/manage");
-    expect(workspaceTopNavTarget({ to: "/usage-stats", workspaceTo: "/usage-stats/detail" })).toBe(
-      "/usage-stats/detail",
-    );
+describe("shouldShowWeatherTriggerLoading", () => {
+  it("shows the compact loading icon only before the first weather result", () => {
+    expect(
+      shouldShowWeatherTriggerLoading({ hasSavedLocation: true, isLoading: true, weather: null }),
+    ).toBe(true);
   });
 
-  it("falls back to the normal top-level route without a workspace override", () => {
-    expect(workspaceTopNavTarget({ to: "/workflow/templates" })).toBe("/workflow/templates");
+  it("keeps cached weather visible during a refresh", () => {
+    expect(
+      shouldShowWeatherTriggerLoading({
+        hasSavedLocation: true,
+        isLoading: true,
+        weather: {
+          weather_code: 0,
+          condition: "clear",
+          temperature_celsius: 26,
+          is_day: true,
+        },
+      }),
+    ).toBe(false);
   });
 });
 

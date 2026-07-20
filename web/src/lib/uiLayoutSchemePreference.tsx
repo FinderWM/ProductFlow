@@ -25,11 +25,15 @@ import { workspaceAppearanceResolvedTheme } from "./workspaceAppearance";
 interface UiLayoutSchemeContextValue {
   activeScheme: UiLayoutScheme;
   defaultScheme: UiLayoutScheme;
+  resolutionStatus: UiLayoutSchemeResolutionStatus;
   setActiveScheme: (scheme: UiLayoutScheme) => void;
   saveDefaultScheme: (scheme: UiLayoutScheme) => void;
+  retryDefaultScheme: () => void;
   isLoadingDefaultScheme: boolean;
   isSavingDefaultScheme: boolean;
 }
+
+export type UiLayoutSchemeResolutionStatus = "disabled" | "resolving" | "resolved" | "fallback-error";
 
 const UiLayoutSchemeContext = createContext<UiLayoutSchemeContextValue | null>(null);
 
@@ -94,6 +98,29 @@ export function resolveActiveSchemeAfterDefaultSaveError({
   return currentScheme === attemptedScheme ? previousActiveScheme : currentScheme;
 }
 
+export function resolveUiLayoutSchemeResolutionStatus({
+  enabled,
+  initializedFromDefault,
+  hasPreferencesData,
+  hasInitialError,
+}: {
+  enabled: boolean;
+  initializedFromDefault: boolean;
+  hasPreferencesData: boolean;
+  hasInitialError: boolean;
+}): UiLayoutSchemeResolutionStatus {
+  if (!enabled) {
+    return "disabled";
+  }
+  if (hasPreferencesData && initializedFromDefault) {
+    return "resolved";
+  }
+  if (hasInitialError && !hasPreferencesData) {
+    return "fallback-error";
+  }
+  return "resolving";
+}
+
 function workspacePointerViewport(): { width: number; height: number; offsetLeft: number; offsetTop: number } {
   const viewport = window.visualViewport;
   return {
@@ -126,9 +153,16 @@ export function UiLayoutSchemeProvider({
     queryKey: USER_UI_PREFERENCES_QUERY_KEY,
     queryFn: api.getUserUiPreferences,
     enabled,
+    retry: 1,
   });
 
   const defaultScheme = resolveUiLayoutSchemePreference(preferencesQuery.data);
+  const resolutionStatus = resolveUiLayoutSchemeResolutionStatus({
+    enabled,
+    initializedFromDefault,
+    hasPreferencesData: preferencesQuery.data !== undefined,
+    hasInitialError: preferencesQuery.isError,
+  });
 
   useEffect(() => {
     const nextState = resolveActiveSchemeFromDefaultLoad({
@@ -295,19 +329,27 @@ export function UiLayoutSchemeProvider({
     [updateMutation],
   );
 
+  const retryDefaultScheme = useCallback(() => {
+    void preferencesQuery.refetch();
+  }, [preferencesQuery]);
+
   const value = useMemo<UiLayoutSchemeContextValue>(
     () => ({
       activeScheme,
       defaultScheme,
+      resolutionStatus,
       setActiveScheme,
       saveDefaultScheme,
-      isLoadingDefaultScheme: preferencesQuery.isLoading,
+      retryDefaultScheme,
+      isLoadingDefaultScheme: preferencesQuery.isFetching,
       isSavingDefaultScheme: updateMutation.isPending,
     }),
     [
       activeScheme,
       defaultScheme,
-      preferencesQuery.isLoading,
+      preferencesQuery.isFetching,
+      resolutionStatus,
+      retryDefaultScheme,
       saveDefaultScheme,
       setActiveScheme,
       updateMutation.isPending,
@@ -325,8 +367,10 @@ export function useUiLayoutScheme(): UiLayoutSchemeContextValue {
   return {
     activeScheme: DEFAULT_UI_LAYOUT_SCHEME,
     defaultScheme: DEFAULT_UI_LAYOUT_SCHEME,
+    resolutionStatus: "disabled",
     setActiveScheme: () => undefined,
     saveDefaultScheme: () => undefined,
+    retryDefaultScheme: () => undefined,
     isLoadingDefaultScheme: false,
     isSavingDefaultScheme: false,
   };
