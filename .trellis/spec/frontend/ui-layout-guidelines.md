@@ -83,6 +83,34 @@ Validation:
 - Documentation-only updates use `git diff --check`; frontend implementation updates also run `pnpm --dir web lint`,
   `pnpm --dir web test:run`, and `just web-build` unless a narrower gate is explicitly justified.
 
+## Loading Shell and Route Profile Contract
+
+- Session bootstrap remains in the classic global theme because layout preference is unavailable before authentication.
+- Session lookup and current-path page-module prefetch start independently. Static route prefetch never calls protected
+  business APIs.
+- Scheme-branched paths preload both candidate page modules while the scheme is unresolved, then render only the selected
+  classic/workspace branch after preference resolution or explicit classic fallback.
+- `web/src/routes/pageModules.ts` is the single source for route id, path matching priority, classic/workspace loader,
+  skeleton profile, navigation target, and active nav id. `App.tsx` and `TopNav.tsx` consume that registry instead of
+  maintaining loader/path copies.
+- Route fallbacks use `PageLoadingSkeleton` profiles that approximate the destination shell (`auth`, `list`, `grid`,
+  `analytics`, `side-rail`, `workbench`, or workspace landing). A generic centered spinner is not a route content fallback.
+- Page chrome and immediately usable navigation stay outside query content branches. Independent page regions use their own
+  `AsyncContent` state and may finish separately.
+- Shared skeletons use `.pf-skeleton`, begin shimmer after approximately `150ms`, and stop animation under
+  `prefers-reduced-motion: reduce`. Do not restore `.animate-shimmer` or page-local neutral shimmer colors.
+- TopNav compact controls may use a spinner for their own first read, search, or explicit refresh. Cached weather remains
+  represented by its weather icon while a refresh runs; a provider refresh must not mark the whole navigation busy.
+
+Validation:
+
+- Cover route matcher/profile selection, loader rejection/retry, boundary reset, bootstrap/layout resolving shells, and
+  navigation target prefetch with focused tests.
+- Audit page roots for data-loading early returns that unmount `TopNav`, toolbars, side rails, or workbench geometry.
+- Search `Loader2`, `animate-pulse`, and query status fields before handoff. Remaining spinners must be action, search,
+  upload, explicit refresh, or durable task-progress feedback.
+- Run `node web/scripts/check-bare-colors.mjs`; new skeleton or status surfaces must use `pf-*` structural tokens.
+
 ## Existing Layout Responsibilities
 
 ### Classic

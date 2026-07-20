@@ -85,12 +85,13 @@ when that keeps runtime behavior unchanged.
 - Locale-aware pure helper changes -> test both `zh-CN` and `en-US`, including fallback behavior for legacy system labels
   when old records store default Chinese titles.
 - DTO/API behavior changes still require `just web-build`; frontend unit tests do not replace backend contract tests.
-- UI/CSS browser verification -> use an independent browser window or isolated browser profile/context. Do not reuse the
-  user's main browser window or existing DevTools page for screenshots, viewport emulation, or visual inspection.
+- UI/CSS browser verification -> reuse one existing browser page when the user explicitly authorizes navigation, viewport,
+  or visual inspection changes. Otherwise use one dedicated browser profile/context for the whole run; do not repeatedly
+  create contexts or trigger extra logins.
 
 ### 7. Wrong vs Correct
 
-#### Wrong
+#### Wrong: Watch Mode
 
 ```bash
 pnpm --dir web test
@@ -98,7 +99,7 @@ pnpm --dir web test
 
 Using watch mode as the handoff gate can hang automation.
 
-#### Correct
+#### Correct: Deterministic Test Run
 
 ```bash
 pnpm --dir web test:run
@@ -106,21 +107,22 @@ pnpm --dir web test:run
 
 Use the deterministic run mode for CI-style verification and keep `test` for local watch mode.
 
-#### Wrong
+#### Wrong: Repeated Browser Contexts
 
 ```text
-Reuse an already-open user browser tab, resize it, or enable mobile emulation there for UI review.
+Create a new isolated context for every route or viewport and repeat the login flow.
 ```
 
-This changes the user's active browser state and can leave the main window in the wrong viewport or emulation mode.
+This wastes time, multiplies authentication state, and makes visual results harder to compare.
 
-#### Correct
+#### Correct: One Authorized Verification Page
 
 ```text
-Open a separate Chrome window/profile or isolated browser context for UI review, then close that verification context when done.
+Reuse one explicitly authorized page for the whole review and restore its viewport/state afterward. Use a dedicated context
+only when the existing session cannot safely cover the requested flow.
 ```
 
-Keep screenshots, viewport changes, storage overrides, and console inspection inside that independent verification surface.
+Keep screenshots, viewport changes, and console inspection in that single verification surface.
 
 ---
 
@@ -158,12 +160,103 @@ Any API contract change should update `web/src/lib/types.ts`, page usage, and ba
 
 Current pages show loading, error, disabled, and success states close to the action:
 
-- Loading spinner for initial app/session load in `App.tsx`.
-- Inspiration list load/error states in `InspirationListPage.tsx`.
+- Stable bootstrap and route skeletons in `App.tsx` and `web/src/components/loading/`.
+- Region-level skeleton, paused, error, empty, and cached-refresh states through `AsyncContent`.
 - Mutation errors in `InspirationCreatePage.tsx`, `InspirationDetailPage.tsx`, `ImageChatPage.tsx`, and `SettingsPage.tsx`.
 - Disabled buttons while mutations are pending.
 
 Follow this style for new actions.
+
+## Scenario: Frontend asynchronous read regions
+
+### 1. Scope / Trigger
+
+- Trigger: adding or changing a TanStack Query-backed page, provider, route chunk, modal, drawer, or content-sized read.
+- Goal: keep shells stable, prevent disabled or failed queries from becoming false empty states, and keep cached content
+  visible during refreshes.
+
+### 2. Signatures
+
+- State adapter: `asyncViewStateFromQuery(...)` in `web/src/lib/asyncViewState.ts`.
+- Multi-query adapter: `combineAsyncViewStates(...)` with explicit participating critical queries.
+- Render boundary: `AsyncContent` from `web/src/components/loading/AsyncContent.tsx`.
+- Route boundary: `RouteLoadingBoundary` plus route metadata/loaders from `web/src/routes/pageModules.ts`.
+- Refresh intent: `"silent-poll" | "user-refresh" | "parameter-change" | "background"`.
+
+### 3. Contracts
+
+- Every read region preserves four facts: participation (`active | inactive`), content (`none | empty | ready`), fetch
+  (`idle | fetching | paused`), and error (`none | initial | refresh`).
+- A disabled query or unmet dependency is `inactive`; `undefined`, disabled, paused, or failed data is not a successful
+  empty result.
+- `AsyncContent` owns the loading/error/paused/empty/ready precedence and accessible busy semantics. The page owns query
+  keys, `queryFn`, `enabled`, business `isEmpty`, retry callbacks, text, and skeleton geometry.
+- Cached `empty` or `ready` content remains mounted while fetching. `silent-poll` does not set `aria-busy`, announce a
+  status, or display recurring refresh chrome; an explicit user refresh may display non-blocking progress.
+- Initial errors retain their error container while retrying. Refresh errors keep current content visible and expose a
+  local retry action.
+- Initial read errors use assertive alert semantics. Cached refresh errors and pauses use `role="status"` with
+  `aria-live="off"`, including page-level feedback rendered outside `AsyncContent`.
+- Content reads use `Skeleton` or stable geometry. Mutation pending, upload, search, generation, cancellation, and durable
+  task progress may keep compact spinners next to the action or task state.
+- Query-driven context values created with `useMemo` must list the derived `AsyncViewState`, manual refresh pending/error,
+  and cached data dependencies. A stale memo can leave TopNav or provider consumers on an obsolete refresh/error state.
+
+### 4. Validation & Error Matrix
+
+- `active + none + fetching` -> region skeleton with one loading status.
+- `active + none + paused` -> recoverable paused state, not an infinite skeleton.
+- `active + none + initial error` -> local error and retry; retrying keeps the error context.
+- `inactive` -> caller-declared stable placeholder or `null`; never a business empty state.
+- `empty/ready + fetching` -> keep current content; feedback follows the declared refresh intent.
+- `empty/ready + refresh error` -> keep current content and show non-blocking recovery.
+- Route chunk rejection -> route chunk error with reload recovery; ordinary render error -> resettable render boundary.
+
+### 5. Good/Base/Bad Cases
+
+- Good: an Image Chat session list waits in `inactive` while its group/admin dependencies resolve, then independently
+  enters loading, error, empty, or ready.
+- Good: manual weather refresh keeps cached weather visible, exposes a nearby pending state, and clears the refresh error
+  after a later success.
+- Base: a parameterized list uses `placeholderData` only when the old rows remain meaningful for the new parameter.
+- Bad: rendering `query.data ?? []` and showing an empty state while `enabled=false` or the first request failed.
+- Bad: replacing cached content with a skeleton whenever `isFetching=true`.
+- Bad: changing a task execution spinner into a skeleton that no longer communicates queued/running progress.
+
+### 6. Tests Required
+
+- Table-driven tests for disabled, initial idle, paused, retrying, partial multi-query success/failure, cached refresh, and
+  `empty + fetching` states.
+- Component tests for one loading status, `aria-busy`, inactive/empty separation, retry actions, and quiet silent polling.
+- Provider tests for cached refresh failure/success and memoized context updates.
+- Route tests for matcher conflicts, shared loader promises, failed-loader recovery, Suspense fallback, and boundary reset.
+- Broad changes run `pnpm --dir web test:run`, `pnpm --dir web lint`, `just web-build`,
+  `node web/scripts/check-bare-colors.mjs`, and `git diff --check`.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```tsx
+const items = query.data?.items ?? [];
+return query.isLoading ? <Spinner /> : items.length ? <List items={items} /> : <Empty />;
+```
+
+Correct:
+
+```tsx
+const state = asyncViewStateFromQuery({
+  active: dependenciesResolved,
+  data: query.data,
+  dataUpdatedAt: query.dataUpdatedAt,
+  isSuccess: query.isSuccess,
+  isError: query.isError,
+  fetchStatus: query.fetchStatus,
+  isEmpty: (data) => data.items.length === 0,
+});
+
+return <AsyncContent state={state} refreshIntent="parameter-change" {...regionSlots} />;
+```
 
 ### Keep settings/admin workspaces theme-complete and locale-complete
 
