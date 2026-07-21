@@ -28,7 +28,12 @@ import { SessionActionsProvider } from "./lib/sessionActions";
 import { TaskNotificationBridge } from "./lib/taskNotifications";
 import { TopNavStateProvider } from "./lib/topNavState";
 import type { SessionState } from "./lib/types";
-import { UiLayoutSchemeProvider, useUiLayoutScheme } from "./lib/uiLayoutSchemePreference";
+import type { UiLayoutScheme } from "./lib/uiLayoutScheme";
+import {
+  UiLayoutSchemeProvider,
+  useUiLayoutScheme,
+  type UiLayoutSchemeResolutionStatus,
+} from "./lib/uiLayoutSchemePreference";
 import {
   PAGE_PATHS,
   pageModuleLoaders,
@@ -78,6 +83,81 @@ const menuHomeRoutes: Array<{
   { code: "rbac", to: resolveNavigationTarget("rbac", "classic"), hasAccess: hasRbacManagementAccess },
 ];
 
+function hasMenuRouteAccessForSession(sessionState: SessionState | null, menuCode: string): boolean {
+  const route = menuHomeRoutes.find((item) => item.code === menuCode);
+  if (!route) {
+    return false;
+  }
+  if (route.hasAccess) {
+    return route.hasAccess(sessionState);
+  }
+  if (route.requiredPermission) {
+    return hasSessionMenuApiPermission(sessionState, menuCode, route.requiredPermission);
+  }
+  return false;
+}
+
+export function resolveDefaultAuthenticatedPath(sessionState: SessionState | null): string {
+  return menuHomeRoutes.find((route) => hasMenuRouteAccessForSession(sessionState, route.code))?.to ?? PAGE_PATHS.help;
+}
+
+interface AppPageModulePrefetchTarget {
+  pathname: string;
+  scheme: UiLayoutScheme;
+}
+
+export function resolveAppPageModulePrefetchTarget({
+  authenticated,
+  pathname,
+  defaultAuthenticatedPath,
+  activeScheme,
+  resolutionStatus,
+}: {
+  authenticated: boolean;
+  pathname: string;
+  defaultAuthenticatedPath: string;
+  activeScheme: UiLayoutScheme;
+  resolutionStatus: UiLayoutSchemeResolutionStatus;
+}): AppPageModulePrefetchTarget | null {
+  if (authenticated && resolutionStatus === "resolving") {
+    return null;
+  }
+  return {
+    pathname: authenticated
+      ? pathname.startsWith(PAGE_PATHS.login)
+        ? defaultAuthenticatedPath
+        : pathname
+      : PAGE_PATHS.login,
+    scheme: authenticated ? activeScheme : "classic",
+  };
+}
+
+function PageModulePrefetchCoordinator({
+  authenticated,
+  defaultAuthenticatedPath,
+}: {
+  authenticated: boolean;
+  defaultAuthenticatedPath: string;
+}) {
+  const location = useLocation();
+  const { activeScheme, resolutionStatus } = useUiLayoutScheme();
+
+  useEffect(() => {
+    const target = resolveAppPageModulePrefetchTarget({
+      authenticated,
+      pathname: location.pathname,
+      defaultAuthenticatedPath,
+      activeScheme,
+      resolutionStatus,
+    });
+    if (target) {
+      void prefetchPageModulesForPathname(target.pathname, target.scheme);
+    }
+  }, [activeScheme, authenticated, defaultAuthenticatedPath, location.pathname, resolutionStatus]);
+
+  return null;
+}
+
 function LayoutSchemeRoute({ classic, workspace }: { classic: ReactNode; workspace: ReactNode }) {
   const { activeScheme } = useUiLayoutScheme();
   return activeScheme === "workspace" ? workspace : classic;
@@ -112,7 +192,6 @@ function LayoutFallbackNotice() {
 
 function AppRoutes() {
   const { t } = useI18n();
-  const location = useLocation();
   const queryClient = useQueryClient();
   const sessionQuery = useQuery({
     queryKey: ["session"],
@@ -128,32 +207,7 @@ function AppRoutes() {
 
   const sessionState = sessionQuery.data ?? null;
   const authenticated = Boolean(sessionState?.authenticated);
-  const hasMenuRouteAccess = (menuCode: string): boolean => {
-    const route = menuHomeRoutes.find((item) => item.code === menuCode);
-    if (!route) {
-      return false;
-    }
-    if (route.hasAccess) {
-      return route.hasAccess(sessionState);
-    }
-    if (route.requiredPermission) {
-      return hasSessionMenuApiPermission(sessionState, menuCode, route.requiredPermission);
-    }
-    return false;
-  };
-  const defaultAuthenticatedPath = menuHomeRoutes.find((route) => hasMenuRouteAccess(route.code))?.to ?? PAGE_PATHS.help;
-
-  useEffect(() => {
-    if (sessionQuery.isPending) {
-      return;
-    }
-    const targetPath = authenticated
-      ? location.pathname.startsWith(PAGE_PATHS.login)
-        ? defaultAuthenticatedPath
-        : location.pathname
-      : PAGE_PATHS.login;
-    void prefetchPageModulesForPathname(targetPath);
-  }, [authenticated, defaultAuthenticatedPath, location.pathname, sessionQuery.isPending]);
+  const defaultAuthenticatedPath = resolveDefaultAuthenticatedPath(sessionState);
 
   if (sessionQuery.isPending && sessionQuery.data === undefined) {
     return <AppBootstrapSkeleton label={t("app.loading")} />;
@@ -182,7 +236,7 @@ function AppRoutes() {
     if (!authenticated) {
       return <Navigate to={PAGE_PATHS.login} replace />;
     }
-    if (!hasMenuRouteAccess(menuCode)) {
+    if (!hasMenuRouteAccessForSession(sessionState, menuCode)) {
       return <Navigate to={defaultAuthenticatedPath} replace />;
     }
     return element;
@@ -204,6 +258,10 @@ function AppRoutes() {
         <TopNavStateProvider enabled={authenticated}>
           <UiLayoutSchemeProvider enabled={authenticated}>
             <CurrentWeatherProvider enabled={authenticated}>
+              <PageModulePrefetchCoordinator
+                authenticated={authenticated}
+                defaultAuthenticatedPath={defaultAuthenticatedPath}
+              />
               <LayoutFallbackNotice />
               {authenticated ? <GlobalBrandMark to={defaultAuthenticatedPath} /> : null}
               <TaskNotificationBridge enabled={authenticated} />
@@ -218,18 +276,44 @@ function AppRoutes() {
                 retryLabel={t("common.retry")}
               >
                 <Routes>
-                  <Route path={PAGE_PATHS.login} element={<LoginPage authenticated={authenticated} />} />
+                  <Route
+                    path={PAGE_PATHS.login}
+                    element={(
+                      <LoginPage
+                        authenticated={authenticated}
+                        authenticatedRedirectPath={defaultAuthenticatedPath}
+                      />
+                    )}
+                  />
                   <Route
                     path={PAGE_PATHS.loginCommandOrbit}
-                    element={<LoginPage authenticated={authenticated} templateId="command-orbit" />}
+                    element={(
+                      <LoginPage
+                        authenticated={authenticated}
+                        authenticatedRedirectPath={defaultAuthenticatedPath}
+                        templateId="command-orbit"
+                      />
+                    )}
                   />
                   <Route
                     path={PAGE_PATHS.loginFluidMist}
-                    element={<LoginPage authenticated={authenticated} templateId="fluid-mist" />}
+                    element={(
+                      <LoginPage
+                        authenticated={authenticated}
+                        authenticatedRedirectPath={defaultAuthenticatedPath}
+                        templateId="fluid-mist"
+                      />
+                    )}
                   />
                   <Route
                     path={PAGE_PATHS.loginImageLab}
-                    element={<LoginPage authenticated={authenticated} templateId="image-lab" />}
+                    element={(
+                      <LoginPage
+                        authenticated={authenticated}
+                        authenticatedRedirectPath={defaultAuthenticatedPath}
+                        templateId="image-lab"
+                      />
+                    )}
                   />
                   <Route
                     path={PAGE_PATHS.inspirations}

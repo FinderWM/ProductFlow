@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "vaul";
 import { Archive, CheckCircle2, Download, Eye, Loader2, Pencil, Plus, Save, Trees, Upload, X } from "lucide-react";
@@ -17,14 +17,14 @@ import {
   type LayoutActionAppearance,
 } from "../components/layoutActionButtons";
 import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
-import { SkeletonCards } from "../components/loading/Skeleton";
+import { Skeleton, SkeletonCards } from "../components/loading/Skeleton";
 import { ModalShell } from "../components/ModalShell";
 import { ResourceBlockedNotice, ResourceMetaBadges, isResourceBlocked } from "../components/ResourceGovernance";
 import { ResourceGroupChipEditor } from "../components/ResourceGroupChipEditor";
 import { TopNav } from "../components/TopNav";
 import { WorkspaceTextInput } from "../components/workspaceInputs";
 import { api, ApiError } from "../lib/api";
-import { asyncViewStateFromQuery, combineAsyncViewStates } from "../lib/asyncViewState";
+import { asyncViewStateFromQuery, type AsyncViewState } from "../lib/asyncViewState";
 import { formatDateTime } from "../lib/format";
 import { useI18n } from "../lib/preferences";
 import type { ResourceLibraryAsset, ResourceLibraryGroup } from "../lib/types";
@@ -295,6 +295,65 @@ function ResourceLibraryGroupList({
   );
 }
 
+function ResourceLibraryGroupAsyncContent({
+  state,
+  className,
+  onRetry,
+  children,
+}: {
+  state: AsyncViewState;
+  className?: string;
+  onRetry: () => void;
+  children: ReactNode;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className={className}>
+      <AsyncContent
+        state={state}
+        refreshIntent="background"
+        loadingLabel={t("resourceLibrary.loading")}
+        skeleton={(
+          <div className="space-y-2">
+            {[1, 2, 3, 4].map((item) => <Skeleton key={item} className="h-10 w-full" rounded="lg" />)}
+          </div>
+        )}
+        initialError={(
+          <AsyncErrorState
+            title={t("resourceLibrary.loadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={state.fetch === "fetching"}
+            onRetry={onRetry}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={onRetry}
+          />
+        )}
+        empty={children}
+        refreshFeedback={state.error === "refresh" ? (
+          <AsyncErrorState
+            className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+            title={t("resourceLibrary.loadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={state.fetch === "fetching"}
+            onRetry={onRetry}
+          />
+        ) : null}
+      >
+        {children}
+      </AsyncContent>
+    </div>
+  );
+}
+
 function ResourceLibraryCreateGroupDialog({
   open,
   name,
@@ -464,35 +523,29 @@ function ResourceLibraryManagePage({
   });
   const groups = groupsQuery.data?.items ?? EMPTY_RESOURCE_LIBRARY_GROUPS;
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? null;
+  const groupsViewState = asyncViewStateFromQuery({
+    active: true,
+    data: groupsQuery.data,
+    dataUpdatedAt: groupsQuery.dataUpdatedAt,
+    isSuccess: groupsQuery.isSuccess,
+    isError: groupsQuery.isError,
+    fetchStatus: groupsQuery.fetchStatus,
+    isEmpty: () => false,
+  });
 
   const assetsQuery = useQuery({
     queryKey: ["resource-library-assets", selectedGroupId || "all"],
     queryFn: () => api.listResourceLibraryAssets({ group_id: selectedGroupId || null }),
   });
   const assets = assetsQuery.data?.items ?? EMPTY_RESOURCE_LIBRARY_ASSETS;
-  const resourceLibraryViewState = combineAsyncViewStates({
+  const assetsViewState = asyncViewStateFromQuery({
     active: true,
-    critical: [
-      asyncViewStateFromQuery({
-        active: true,
-        data: groupsQuery.data,
-        dataUpdatedAt: groupsQuery.dataUpdatedAt,
-        isSuccess: groupsQuery.isSuccess,
-        isError: groupsQuery.isError,
-        fetchStatus: groupsQuery.fetchStatus,
-        isEmpty: () => false,
-      }),
-      asyncViewStateFromQuery({
-        active: true,
-        data: assetsQuery.data,
-        dataUpdatedAt: assetsQuery.dataUpdatedAt,
-        isSuccess: assetsQuery.isSuccess,
-        isError: assetsQuery.isError,
-        fetchStatus: assetsQuery.fetchStatus,
-        isEmpty: (data) => data.items.length === 0,
-      }),
-    ],
-    isEmpty: assets.length === 0,
+    data: assetsQuery.data,
+    dataUpdatedAt: assetsQuery.dataUpdatedAt,
+    isSuccess: assetsQuery.isSuccess,
+    isError: assetsQuery.isError,
+    fetchStatus: assetsQuery.fetchStatus,
+    isEmpty: (data) => data.items.length === 0,
   });
 
   useEffect(() => {
@@ -641,11 +694,11 @@ function ResourceLibraryManagePage({
   });
 
   const assetCountLabel = useMemo(() => {
-    if (resourceLibraryViewState.content === "none" && resourceLibraryViewState.fetch === "fetching") {
+    if (assetsViewState.content === "none" && assetsViewState.fetch === "fetching") {
       return t("resourceLibrary.loading");
     }
     return t("resourceLibrary.assetCount", { count: assets.length });
-  }, [assets.length, resourceLibraryViewState.content, resourceLibraryViewState.fetch, t]);
+  }, [assets.length, assetsViewState.content, assetsViewState.fetch, t]);
 
   useEffect(() => {
     if (!message) {
@@ -814,28 +867,36 @@ function ResourceLibraryManagePage({
                   <span>{t("resourceLibrary.groups")}</span>
                 </div>
               </div>
-              <ResourceLibraryGroupList
-                groups={groups}
-                selectedGroupId={selectedGroupId}
-                editingGroupId={editingGroupId}
-                editingGroupName={editingGroupName}
-                updateGroupPending={updateGroupMutation.isPending}
-                updatingGroupId={updateGroupMutation.variables?.groupId ?? null}
-                navClassName={workspaceSubpage ? "space-y-1 px-3 py-5" : "space-y-1"}
-                workspaceSubpage={workspaceSubpage}
-                groupsLabel={t("resourceLibrary.groups")}
-                allGroupsLabel={t("resourceLibrary.allGroups")}
-                cancelLabel={t("common.cancel")}
-                saveLabel={t("common.save")}
-                renameGroupLabel={t("resourceLibrary.renameGroup")}
-                archiveGroupLabel={t("resourceLibrary.archiveGroup")}
-                onSelectGroup={setSelectedGroupId}
-                onEditingGroupNameChange={setEditingGroupName}
-                onStartEditingGroup={handleStartEditingGroup}
-                onCancelEditingGroup={handleCancelEditingGroup}
-                onSaveGroupName={handleSaveGroupName}
-                onArchiveGroup={handleQueueGroupArchive}
-              />
+              <ResourceLibraryGroupAsyncContent
+                state={groupsViewState}
+                className={workspaceSubpage ? "px-3 py-5" : undefined}
+                onRetry={() => {
+                  void groupsQuery.refetch();
+                }}
+              >
+                <ResourceLibraryGroupList
+                  groups={groups}
+                  selectedGroupId={selectedGroupId}
+                  editingGroupId={editingGroupId}
+                  editingGroupName={editingGroupName}
+                  updateGroupPending={updateGroupMutation.isPending}
+                  updatingGroupId={updateGroupMutation.variables?.groupId ?? null}
+                  navClassName="space-y-1"
+                  workspaceSubpage={workspaceSubpage}
+                  groupsLabel={t("resourceLibrary.groups")}
+                  allGroupsLabel={t("resourceLibrary.allGroups")}
+                  cancelLabel={t("common.cancel")}
+                  saveLabel={t("common.save")}
+                  renameGroupLabel={t("resourceLibrary.renameGroup")}
+                  archiveGroupLabel={t("resourceLibrary.archiveGroup")}
+                  onSelectGroup={setSelectedGroupId}
+                  onEditingGroupNameChange={setEditingGroupName}
+                  onStartEditingGroup={handleStartEditingGroup}
+                  onCancelEditingGroup={handleCancelEditingGroup}
+                  onSaveGroupName={handleSaveGroupName}
+                  onArchiveGroup={handleQueueGroupArchive}
+                />
+              </ResourceLibraryGroupAsyncContent>
             </aside>
           ) : null}
 
@@ -854,7 +915,7 @@ function ResourceLibraryManagePage({
                   appearance={resourceLibraryActionAppearance(workspaceSubpage)}
                   ariaLabel={t("resourceLibrary.uploadAction")}
                   multiple
-                  disabled={uploadAssetsMutation.isPending || groupsQuery.isLoading}
+                  disabled={uploadAssetsMutation.isPending || groupsViewState.content === "none"}
                   size="lg"
                   fullWidth
                   className="min-h-12 cursor-pointer"
@@ -875,7 +936,7 @@ function ResourceLibraryManagePage({
                   rootClassName="w-full sm:min-w-72"
                   buttonClassName={`${clipboardActionClassName} min-h-12 w-full`}
                   multiple
-                  disabled={uploadAssetsMutation.isPending || groupsQuery.isLoading}
+                  disabled={uploadAssetsMutation.isPending || groupsViewState.content === "none"}
                   label={t("common.pasteImage")}
                   closeLabel={t("common.close")}
                   pasteAreaLabel={t("common.pasteImageTarget")}
@@ -890,7 +951,7 @@ function ResourceLibraryManagePage({
               </div>
             </div>
             <AsyncContent
-              state={resourceLibraryViewState}
+              state={assetsViewState}
               refreshIntent="parameter-change"
               loadingLabel={t("resourceLibrary.loading")}
               skeleton={<SkeletonCards count={6} />}
@@ -900,9 +961,9 @@ function ResourceLibraryManagePage({
                   title={t("resourceLibrary.loadFailed")}
                   retryLabel={t("common.retry")}
                   retryingLabel={t("app.loading")}
-                  retrying={resourceLibraryViewState.fetch === "fetching"}
+                  retrying={assetsViewState.fetch === "fetching"}
                   onRetry={() => {
-                    void Promise.all([groupsQuery.refetch(), assetsQuery.refetch()]);
+                    void assetsQuery.refetch();
                   }}
                 />
               )}
@@ -912,7 +973,7 @@ function ResourceLibraryManagePage({
                   message={t("app.requestPaused.message")}
                   retryLabel={t("common.retry")}
                   onRetry={() => {
-                    void Promise.all([groupsQuery.refetch(), assetsQuery.refetch()]);
+                    void assetsQuery.refetch();
                   }}
                 />
               )}
@@ -922,15 +983,15 @@ function ResourceLibraryManagePage({
                   <div>{t("resourceLibrary.empty")}</div>
                 </div>
               )}
-              refreshFeedback={resourceLibraryViewState.error === "refresh" ? (
+              refreshFeedback={assetsViewState.error === "refresh" ? (
                 <AsyncErrorState
                   className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
                   title={t("resourceLibrary.loadFailed")}
                   retryLabel={t("common.retry")}
                   retryingLabel={t("app.loading")}
-                  retrying={resourceLibraryViewState.fetch === "fetching"}
+                  retrying={assetsViewState.fetch === "fetching"}
                   onRetry={() => {
-                    void Promise.all([groupsQuery.refetch(), assetsQuery.refetch()]);
+                    void assetsQuery.refetch();
                   }}
                 />
               ) : null}
@@ -974,7 +1035,11 @@ function ResourceLibraryManagePage({
                           appearance={resourceLibraryActionAppearance(workspaceSubpage)}
                           groups={groups}
                           selectedIds={draftGroupIds}
-                          disabled={assetBlocked || (updateAssetGroupsMutation.isPending && updateAssetGroupsMutation.variables?.assetId === asset.id)}
+                          disabled={
+                            groupsViewState.content === "none"
+                            || assetBlocked
+                            || (updateAssetGroupsMutation.isPending && updateAssetGroupsMutation.variables?.assetId === asset.id)
+                          }
                           editLabel={t("resourceLibrary.editAssetGroups")}
                           ungroupedLabel={t("resourceLibrary.ungrouped")}
                           moreLabel={(count) => t("resourceLibrary.moreGroups", { count })}
@@ -1121,29 +1186,37 @@ function ResourceLibraryManagePage({
                 </PageActionButton>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-                <ResourceLibraryGroupList
-                  groups={groups}
-                  selectedGroupId={selectedGroupId}
-                  editingGroupId={editingGroupId}
-                  editingGroupName={editingGroupName}
-                  updateGroupPending={updateGroupMutation.isPending}
-                  updatingGroupId={updateGroupMutation.variables?.groupId ?? null}
-                  navClassName="space-y-1 px-3 py-5"
-                  showGroupActionsAlways
-                  workspaceSubpage={workspaceSubpage}
-                  groupsLabel={t("resourceLibrary.groups")}
-                  allGroupsLabel={t("resourceLibrary.allGroups")}
-                  cancelLabel={t("common.cancel")}
-                  saveLabel={t("common.save")}
-                  renameGroupLabel={t("resourceLibrary.renameGroup")}
-                  archiveGroupLabel={t("resourceLibrary.archiveGroup")}
-                  onSelectGroup={handleSelectMobileGroup}
-                  onEditingGroupNameChange={setEditingGroupName}
-                  onStartEditingGroup={handleStartEditingGroup}
-                  onCancelEditingGroup={handleCancelEditingGroup}
-                  onSaveGroupName={handleSaveGroupName}
-                  onArchiveGroup={handleQueueGroupArchive}
-                />
+                <ResourceLibraryGroupAsyncContent
+                  state={groupsViewState}
+                  className="px-3 py-5"
+                  onRetry={() => {
+                    void groupsQuery.refetch();
+                  }}
+                >
+                  <ResourceLibraryGroupList
+                    groups={groups}
+                    selectedGroupId={selectedGroupId}
+                    editingGroupId={editingGroupId}
+                    editingGroupName={editingGroupName}
+                    updateGroupPending={updateGroupMutation.isPending}
+                    updatingGroupId={updateGroupMutation.variables?.groupId ?? null}
+                    navClassName="space-y-1"
+                    showGroupActionsAlways
+                    workspaceSubpage={workspaceSubpage}
+                    groupsLabel={t("resourceLibrary.groups")}
+                    allGroupsLabel={t("resourceLibrary.allGroups")}
+                    cancelLabel={t("common.cancel")}
+                    saveLabel={t("common.save")}
+                    renameGroupLabel={t("resourceLibrary.renameGroup")}
+                    archiveGroupLabel={t("resourceLibrary.archiveGroup")}
+                    onSelectGroup={handleSelectMobileGroup}
+                    onEditingGroupNameChange={setEditingGroupName}
+                    onStartEditingGroup={handleStartEditingGroup}
+                    onCancelEditingGroup={handleCancelEditingGroup}
+                    onSaveGroupName={handleSaveGroupName}
+                    onArchiveGroup={handleQueueGroupArchive}
+                  />
+                </ResourceLibraryGroupAsyncContent>
               </div>
             </Drawer.Content>
           </Drawer.Portal>

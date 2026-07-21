@@ -10,6 +10,7 @@ import "./LoginPage.css";
 
 interface LoginPageProps {
   authenticated: boolean;
+  authenticatedRedirectPath: string;
   templateId?: LoginPageTemplateId;
 }
 
@@ -126,7 +127,7 @@ function clearCommandOrbitPointerEffect(event: PointerEvent<HTMLElement>, effect
   }
 }
 
-export function LoginPage({ authenticated, templateId }: LoginPageProps) {
+export function LoginPage({ authenticated, authenticatedRedirectPath, templateId }: LoginPageProps) {
   const { t } = useI18n();
   const [mode, setModeState] = useState<"login" | "password">("login");
   const [username, setUsername] = useState("");
@@ -139,9 +140,9 @@ export function LoginPage({ authenticated, templateId }: LoginPageProps) {
 
   useEffect(() => {
     if (authenticated) {
-      navigate("/inspirations", { replace: true });
+      navigate(authenticatedRedirectPath, { replace: true });
     }
-  }, [authenticated, navigate]);
+  }, [authenticated, authenticatedRedirectPath, navigate]);
 
   const loginPageConfigQuery = useQuery({
     queryKey: ["public-login-page-config", templateId ?? "selected"],
@@ -157,7 +158,6 @@ export function LoginPage({ authenticated, templateId }: LoginPageProps) {
     onSuccess: async () => {
       queryClient.removeQueries({ queryKey: ["config"] });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
-      navigate("/inspirations", { replace: true });
     },
     onError: (mutationError) => {
       if (mutationError instanceof ApiError) {

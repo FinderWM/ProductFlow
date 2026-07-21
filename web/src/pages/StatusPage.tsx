@@ -210,10 +210,13 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
   });
   const isWorkspaceSubpage = activeScheme === "workspace" && mode === "detail";
   const PageActionButton = actionButtonComponentForAppearance(isWorkspaceSubpage ? "workspace" : "classic");
+  const refetchStatus = () => {
+    setUserRefreshing(true);
+    void statusQuery.refetch().finally(() => setUserRefreshing(false));
+  };
   const refreshStatus = () => {
     if (range.start_date === appliedRange.start_date && range.end_date === appliedRange.end_date) {
-      setUserRefreshing(true);
-      void statusQuery.refetch().finally(() => setUserRefreshing(false));
+      refetchStatus();
       return;
     }
     setUserRefreshing(false);
@@ -303,6 +306,7 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
             <AsyncContent
               state={statusViewState}
               refreshIntent={userRefreshing ? "user-refresh" : "parameter-change"}
+              className="flex flex-col gap-5"
               loadingLabel={t("app.loading")}
               skeleton={(
                 <div className="space-y-5">
@@ -334,6 +338,16 @@ export function StatusPage({ mode = "auto" }: StatusPageProps = {}) {
                 />
               )}
               empty={null}
+              refreshFeedback={statusViewState.error === "refresh" ? (
+                <AsyncErrorState
+                  className="order-first rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                  title={statusQuery.error instanceof ApiError ? statusQuery.error.detail : t("statusPage.loadFailed")}
+                  retryLabel={t("common.retry")}
+                  retryingLabel={t("app.loading")}
+                  retrying={statusQuery.isFetching}
+                  onRetry={refetchStatus}
+                />
+              ) : null}
             >
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
               <MetricCard
