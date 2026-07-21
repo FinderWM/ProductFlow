@@ -282,6 +282,34 @@ single-theme mock copied into both modes.
 - Configuration pages should keep app-style density: fixed or sticky navigation, one active working panel, explicit field
   labels, and save/error feedback near the changed section.
 
+### Parameterized list pages with heavy row previews
+
+List/admin pages that render expensive per-row previews (SVG mini-maps, graph thumbnails, large form cards) must keep
+typing and filtering interactive:
+
+- Isolate each row/card with `memo` (or an equivalent boundary). Draft/form state for one row must not re-render other
+  rows' previews. Prefer passing `draft={drafts[key]}` (possibly `undefined`) and computing the fallback draft inside
+  the memoized card.
+- Stabilize list derivation with `useMemo` on query `data` references + locale/filters. Do not rebuild sorted/localized
+  arrays on unrelated page state (drawer open, soft feedback).
+- Debounce search strings that enter React Query keys (about 250–300ms). Keep the input controlled by the immediate
+  value; only the query path uses the debounced value. Keep `placeholderData` / `keepPreviousData` and
+  `AsyncContent refreshIntent="parameter-change"` so filter changes do not flash a full-region skeleton.
+- When a page combines a primary list query with a secondary enrichment query (for example global templates + user
+  copy-sources), put only the primary query in `combineAsyncViewStates.critical`. Merge secondary rows when ready.
+  Secondary failures must not turn an already-ready primary list into `initial-error`; show non-blocking soft feedback
+  outside `AsyncContent.refreshFeedback` if the critical state has no refresh error (otherwise the slot is suppressed).
+- `isEmpty` for combined lists must not treat "secondary still unresolved + primary temporarily empty" as a final empty
+  state when the product still expects secondary rows.
+- Optional offscreen cost reduction: card shells may use `content-visibility: auto` with a realistic
+  `contain-intrinsic-size` (see inspiration list cards). Full window virtualization is optional and out of scope unless
+  product requires it.
+- Prefer memoized preview leaves that accept already-localized data (`localized` / skip re-localize) when the parent
+  already ran localization.
+
+Reference implementation: `web/src/pages/TemplateManagementPage.tsx` and `TemplateGraphPreview` in
+`web/src/pages/inspiration-detail/TemplateGroupsPanel.tsx`.
+
 ### Workspace home navigation contract
 
 Wrong:

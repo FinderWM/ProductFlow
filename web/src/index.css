@@ -3018,7 +3018,8 @@ textarea {
 
 .pf-workspace-subpage .pf-side-shell {
   max-width: none;
-  overflow: hidden;
+  /* Keep overflow visible so sticky side rails can pin against page scroll.
+     Rail/content already own radius + paint bounds under workspace selectors. */
   border-radius: var(--pf-radius-lg);
   background: rgb(255 255 255 / 0.44);
   box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.72), 0 8px 22px rgb(37 43 46 / 0.032);

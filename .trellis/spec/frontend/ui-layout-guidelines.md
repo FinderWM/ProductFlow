@@ -608,6 +608,11 @@ New workspace appearances must be visually checked against these areas:
   resource library summary, status/usage cards, empty/loading/error states.
 - Workspace subpages: `pf-workspace-subpage`, frame shell, headers, cards, tables, filters, forms, pagination, destructive
   or moderation actions, preview panes, and dialog/drawer surfaces.
+- Workspace side-shell sticky contract: do **not** set `overflow: hidden` (or `clip`) on
+  `.pf-workspace-subpage .pf-side-shell` if the rail must stay `position: sticky` under the top chrome. Sticky is broken by
+  any non-visible overflow on an ancestor. Prefer keeping rounded glass paint on `.pf-side-rail` / `.pf-side-content`
+  (they already own radius/background under workspace selectors). When changing shell overflow, spot-check resource
+  library and other side-shell subpages for edge clipping regressions.
 - Image-generation workbench pages: rails, session list, stage, drawer, composer, reference image panels, disabled actions,
   active session state, loading tasks, and error banners.
 - Gallery/media surfaces: image cards, preview modal, moderation labels/actions, sensitive-image masks, and download links.

@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import type { AsyncViewState } from "../lib/asyncViewState";
 import type { CanvasTemplateSummary } from "../lib/types";
 import {
+  mergeTemplateManagementItems,
   shouldUseDesktopTemplateCategoryRail,
   sortTemplateManagementTemplates,
   TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY,
+  TEMPLATE_MANAGE_SEARCH_DEBOUNCE_MS,
   templateManagementInitialWorkflowEntry,
+  templateManagementListCriticalStates,
+  templateManagementListIsEmpty,
   templateManagementTemplateQueryInputs,
 } from "./TemplateManagementPage";
 
@@ -53,6 +58,20 @@ function templateSummary(
   };
 }
 
+const readyState: AsyncViewState = {
+  participation: "active",
+  content: "ready",
+  fetch: "idle",
+  error: "none",
+};
+
+const loadingState: AsyncViewState = {
+  participation: "active",
+  content: "none",
+  fetch: "fetching",
+  error: "none",
+};
+
 describe("TemplateManagementPage helpers", () => {
   it("uses the 1024px desktop breakpoint for the category rail", () => {
     expect(TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY).toBe("(min-width: 1024px)");
@@ -60,6 +79,10 @@ describe("TemplateManagementPage helpers", () => {
       true,
     );
     expect(shouldUseDesktopTemplateCategoryRail(() => false)).toBe(false);
+  });
+
+  it("debounces search query input at 300ms", () => {
+    expect(TEMPLATE_MANAGE_SEARCH_DEBOUNCE_MS).toBe(300);
   });
 
   it("maps the all entry filter to an omitted workflow entry", () => {
@@ -146,5 +169,77 @@ describe("TemplateManagementPage helpers", () => {
       "user-copy-z",
       "global-tail-a",
     ]);
+  });
+
+  it("merges global list without requiring user copy sources", () => {
+    const globalOnly = mergeTemplateManagementItems({
+      mode: "global",
+      globalItems: [
+        templateSummary({
+          key: "global-copy-a",
+          title: "全局文案",
+          entry_mode: "copy",
+          scope: "global",
+          sort_order: 10,
+        }),
+      ],
+    });
+    expect(globalOnly.map((template) => template.key)).toEqual(["global-copy-a"]);
+
+    const withUser = mergeTemplateManagementItems({
+      mode: "global",
+      globalItems: globalOnly,
+      userItems: [
+        templateSummary({
+          key: "user-image-a",
+          title: "用户主图",
+          entry_mode: "image",
+          scope: "user",
+          sort_order: 5,
+        }),
+      ],
+    });
+    expect(withUser.map((template) => template.key)).toEqual(["user-image-a", "global-copy-a"]);
+  });
+
+  it("treats only global templates as critical for the global manage list", () => {
+    expect(
+      templateManagementListCriticalStates({
+        mode: "global",
+        personalTemplatesState: loadingState,
+        globalTemplatesState: readyState,
+      }),
+    ).toEqual([readyState]);
+    expect(
+      templateManagementListCriticalStates({
+        mode: "personal",
+        personalTemplatesState: readyState,
+        globalTemplatesState: loadingState,
+      }),
+    ).toEqual([readyState]);
+  });
+
+  it("keeps global list non-empty while user copy sources are still loading", () => {
+    expect(
+      templateManagementListIsEmpty({
+        mode: "global",
+        templateCount: 0,
+        userTemplatesState: loadingState,
+      }),
+    ).toBe(false);
+    expect(
+      templateManagementListIsEmpty({
+        mode: "global",
+        templateCount: 0,
+        userTemplatesState: readyState,
+      }),
+    ).toBe(true);
+    expect(
+      templateManagementListIsEmpty({
+        mode: "personal",
+        templateCount: 0,
+        userTemplatesState: loadingState,
+      }),
+    ).toBe(true);
   });
 });

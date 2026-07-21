@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "vaul";
 import {
@@ -101,14 +101,78 @@ const TEMPLATE_PANEL_CLASS =
   "dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25";
 const TEMPLATE_FIELD_CARD_CLASS =
   "pf-settings-field-card rounded-xl border border-slate-200 bg-slate-50/70 shadow-none dark:border-slate-700 dark:bg-[#0b1220]";
+const EMPTY_TEMPLATE_CATEGORIES: CanvasTemplateCategory[] = [];
 const TEMPLATE_FEEDBACK_AUTO_DISMISS_MS = 1000;
 export const TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY = "(min-width: 1024px)";
+export const TEMPLATE_MANAGE_SEARCH_DEBOUNCE_MS = 300;
 
 export function shouldUseDesktopTemplateCategoryRail(
   mediaMatches: (query: string) => boolean = (query) =>
     typeof window !== "undefined" && Boolean(window.matchMedia?.(query).matches),
 ): boolean {
   return mediaMatches(TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY);
+}
+
+/** Debounced value for query keys while inputs stay immediate. */
+export function useDebouncedValue<T>(value: T, delayMs: number = TEMPLATE_MANAGE_SEARCH_DEBOUNCE_MS): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debouncedValue;
+}
+
+export function mergeTemplateManagementItems({
+  mode,
+  personalItems,
+  globalItems,
+  userItems,
+}: {
+  mode: TemplateManagementMode;
+  personalItems?: readonly CanvasTemplateSummary[];
+  globalItems?: readonly CanvasTemplateSummary[];
+  userItems?: readonly CanvasTemplateSummary[];
+}): CanvasTemplateSummary[] {
+  if (mode === "personal") {
+    return sortTemplateManagementTemplates([...(personalItems ?? [])]);
+  }
+  return sortTemplateManagementTemplates([...(globalItems ?? []), ...(userItems ?? [])]);
+}
+
+export function templateManagementListCriticalStates({
+  mode,
+  personalTemplatesState,
+  globalTemplatesState,
+}: {
+  mode: TemplateManagementMode;
+  personalTemplatesState: AsyncViewState;
+  globalTemplatesState: AsyncViewState;
+}): AsyncViewState[] {
+  return mode === "global" ? [globalTemplatesState] : [personalTemplatesState];
+}
+
+/** Global list waits for user copy-sources only for merge, not for empty vs ready. */
+export function templateManagementListIsEmpty({
+  mode,
+  templateCount,
+  userTemplatesState,
+}: {
+  mode: TemplateManagementMode;
+  templateCount: number;
+  userTemplatesState: AsyncViewState;
+}): boolean {
+  if (templateCount > 0) {
+    return false;
+  }
+  if (
+    mode === "global" &&
+    userTemplatesState.content === "none" &&
+    userTemplatesState.error === "none"
+  ) {
+    return false;
+  }
+  return true;
 }
 const TEMPLATE_ENTRY_SORT_ORDER: Record<CanvasTemplateEntryMode, number> = {
   image: 0,
@@ -605,6 +669,314 @@ function TemplateCategoryPanel({
   );
 }
 
+const TEMPLATE_MANAGE_CARD_SHELL_CLASS =
+  `${TEMPLATE_FIELD_CARD_CLASS} overflow-hidden [content-visibility:auto] [contain-intrinsic-size:720px]`;
+
+const TemplateManageCard = memo(function TemplateManageCard({
+  template,
+  draft,
+  mode,
+  categories,
+  categoriesResolved,
+  isWorkspaceSubpage,
+  savePending,
+  reviewPending,
+  onDraftPatch,
+  onSave,
+  onDelete,
+  onCopyGlobal,
+  onReview,
+}: {
+  template: CanvasTemplateSummary;
+  draft: TemplateDraft | undefined;
+  mode: TemplateManagementMode;
+  categories: CanvasTemplateCategory[];
+  categoriesResolved: boolean;
+  isWorkspaceSubpage: boolean;
+  savePending: boolean;
+  reviewPending: boolean;
+  onDraftPatch: (templateKey: string, baseTemplate: CanvasTemplateSummary, patch: Partial<TemplateDraft>) => void;
+  onSave: (template: CanvasTemplateSummary, draft: TemplateDraft) => void;
+  onDelete: (template: CanvasTemplateSummary) => void;
+  onCopyGlobal: (template: CanvasTemplateSummary) => void;
+  onReview: (template: CanvasTemplateSummary, approved: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const PageActionButton = templateActionButtonComponent(isWorkspaceSubpage);
+  const resolvedDraft = draft ?? templateDraft(template);
+  const templateId = template.user_template_id ?? template.template_id ?? template.key;
+  const isUserTemplate = template.scope === "user" && Boolean(template.user_template_id);
+  const canEditTemplate = mode === "personal" ? isUserTemplate : template.scope === "global";
+  const canManageAvailability = mode === "global";
+  const requiresReviewNote = mode === "personal" && isUserTemplate && template.effective_enabled === false;
+  const patchDraft = (patch: Partial<TemplateDraft>) => onDraftPatch(template.key, template, patch);
+
+  return (
+    <article className={TEMPLATE_MANAGE_CARD_SHELL_CLASS}>
+      <div className="border-b border-slate-200 dark:border-slate-700">
+        <TemplateGraphPreview template={template} localized />
+      </div>
+      <div className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
+            {t(ENTRY_LABEL_KEYS[template.entry_mode])}
+          </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
+            {template.category_name ?? t("templateFilter.allCategories")}
+          </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
+            {t("templateManage.nodeCount", { count: template.preview_nodes.length })}
+          </span>
+          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
+            {t("templateManage.edgeCount", { count: template.preview_edges.length })}
+          </span>
+          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${templateAvailabilityClassName(template)}`}>
+            {t(templateAvailabilityLabelKey(template))}
+          </span>
+          {template.owner_username ? (
+            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
+              {t("templateManage.owner", { name: template.owner_username })}
+            </span>
+          ) : null}
+        </div>
+        {template.disabled_reason ? (
+          <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700 dark:border-red-400/25 dark:bg-red-500/10 dark:text-red-200">
+            {t("templateManage.disabledReason", { reason: template.disabled_reason })}
+          </div>
+        ) : null}
+        {template.review_note ? (
+          <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100">
+            {t("templateManage.reviewNote", { note: template.review_note })}
+          </div>
+        ) : null}
+        {isWorkspaceSubpage ? (
+          <WorkspaceTextInput
+            value={resolvedDraft.title}
+            onChange={(event) => patchDraft({ title: event.target.value })}
+            readOnly={!canEditTemplate}
+            className="font-semibold"
+            placeholder={t("templateManage.templateTitle")}
+            maxLength={255}
+          />
+        ) : (
+          <ClassicTextInput
+            value={resolvedDraft.title}
+            onChange={(event) => patchDraft({ title: event.target.value })}
+            readOnly={!canEditTemplate}
+            className="font-semibold"
+            placeholder={t("templateManage.templateTitle")}
+            maxLength={255}
+          />
+        )}
+        {isWorkspaceSubpage ? (
+          <WorkspaceTextarea
+            value={resolvedDraft.description}
+            onChange={(event) => patchDraft({ description: event.target.value })}
+            readOnly={!canEditTemplate}
+            className="min-h-20 resize-y"
+            placeholder={t("templateManage.templateDescription")}
+            maxLength={1000}
+          />
+        ) : (
+          <ClassicTextarea
+            value={resolvedDraft.description}
+            onChange={(event) => patchDraft({ description: event.target.value })}
+            readOnly={!canEditTemplate}
+            className="min-h-20"
+            placeholder={t("templateManage.templateDescription")}
+            maxLength={1000}
+          />
+        )}
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
+          {isWorkspaceSubpage ? (
+            <WorkspaceSelectField
+              value={resolvedDraft.category_id}
+              options={[
+                { value: "", label: t("templateFilter.allCategories") },
+                ...categories.map((category) => ({ value: category.id, label: category.name })),
+              ]}
+              onChange={(value) => patchDraft({ category_id: value })}
+              ariaLabel={t("templateManage.templateCategory")}
+              size="compact"
+              disabled={!canEditTemplate || !categoriesResolved}
+            />
+          ) : (
+            <ClassicSelectField
+              value={resolvedDraft.category_id}
+              options={[
+                { value: "", label: t("templateFilter.allCategories") },
+                ...categories.map((category) => ({ value: category.id, label: category.name })),
+              ]}
+              onChange={(value) => patchDraft({ category_id: value })}
+              ariaLabel={t("templateManage.templateCategory")}
+              radius="lg"
+              size="compact"
+              disabled={!canEditTemplate || !categoriesResolved}
+            />
+          )}
+          {isWorkspaceSubpage ? (
+            <WorkspaceTextInput
+              type="number"
+              value={resolvedDraft.sort_order}
+              onChange={(event) => patchDraft({ sort_order: event.target.value })}
+              readOnly={!canEditTemplate}
+              size="compact"
+              className="h-9"
+              placeholder={t("templateManage.templateSort")}
+            />
+          ) : (
+            <ClassicTextInput
+              type="number"
+              value={resolvedDraft.sort_order}
+              onChange={(event) => patchDraft({ sort_order: event.target.value })}
+              readOnly={!canEditTemplate}
+              size="compact"
+              placeholder={t("templateManage.templateSort")}
+            />
+          )}
+        </div>
+        {canManageAvailability ? (
+          <div className={`${TEMPLATE_FIELD_CARD_CLASS} space-y-2 px-3 py-2`}>
+            {isWorkspaceSubpage ? (
+              <WorkspaceCheckbox
+                checked={resolvedDraft.enabled}
+                onChange={(event) => patchDraft({ enabled: event.target.checked })}
+                wrapperClassName="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"
+              >
+                {t("templateManage.templateEnabled")}
+              </WorkspaceCheckbox>
+            ) : (
+              <ClassicCheckbox
+                checked={resolvedDraft.enabled}
+                onChange={(event) => patchDraft({ enabled: event.target.checked })}
+                wrapperClassName="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"
+              >
+                {t("templateManage.templateEnabled")}
+              </ClassicCheckbox>
+            )}
+            {!resolvedDraft.enabled ? (
+              isWorkspaceSubpage ? (
+                <WorkspaceTextarea
+                  value={resolvedDraft.disabled_reason}
+                  onChange={(event) => patchDraft({ disabled_reason: event.target.value })}
+                  size="compact"
+                  className="min-h-16 resize-y text-xs leading-5"
+                  placeholder={t("templateManage.disabledReasonPlaceholder")}
+                  maxLength={1000}
+                />
+              ) : (
+                <ClassicTextarea
+                  value={resolvedDraft.disabled_reason}
+                  onChange={(event) => patchDraft({ disabled_reason: event.target.value })}
+                  size="compact"
+                  className="min-h-16 text-xs leading-5"
+                  placeholder={t("templateManage.disabledReasonPlaceholder")}
+                  maxLength={1000}
+                />
+              )
+            ) : null}
+          </div>
+        ) : null}
+        {requiresReviewNote ? (
+          isWorkspaceSubpage ? (
+            <WorkspaceTextarea
+              value={resolvedDraft.review_note}
+              onChange={(event) => patchDraft({ review_note: event.target.value })}
+              size="compact"
+              className="min-h-16 resize-y border-amber-200 bg-amber-50 text-xs leading-5 text-amber-950 focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+              placeholder={t("templateManage.reviewNotePlaceholder")}
+              maxLength={1000}
+            />
+          ) : (
+            <ClassicTextarea
+              value={resolvedDraft.review_note}
+              onChange={(event) => patchDraft({ review_note: event.target.value })}
+              size="compact"
+              className="min-h-16 border-amber-200 bg-amber-50 text-xs leading-5 text-amber-950 focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+              placeholder={t("templateManage.reviewNotePlaceholder")}
+              maxLength={1000}
+            />
+          )
+        ) : null}
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+          {mode === "global" && isUserTemplate ? (
+            <PageActionButton
+              onClick={() => onCopyGlobal(template)}
+              preset="secondary"
+              size="md"
+              disabled={!categoriesResolved}
+              leadingIcon={<CopyPlus size={13} />}
+            >
+              {t("templateManage.copyGlobal")}
+            </PageActionButton>
+          ) : null}
+          {mode === "global" && isUserTemplate && template.review_status === "pending" ? (
+            <>
+              <PageActionButton
+                disabled={reviewPending || !templateId}
+                onClick={() => onReview(template, false)}
+                preset="secondary"
+                size="md"
+              >
+                {t("templateManage.reviewReject")}
+              </PageActionButton>
+              <PageActionButton
+                disabled={reviewPending || !templateId}
+                onClick={() => onReview(template, true)}
+                preset="primary"
+                size="md"
+              >
+                {t("templateManage.reviewApprove")}
+              </PageActionButton>
+            </>
+          ) : null}
+          {canManageAvailability && !canEditTemplate ? (
+            <PageActionButton
+              disabled={savePending || !templateId}
+              onClick={() => onSave(template, resolvedDraft)}
+              preset="primary"
+              size="md"
+              loading={savePending}
+              leadingIcon={<Save size={13} />}
+            >
+              {t("templateManage.templateSave")}
+            </PageActionButton>
+          ) : null}
+          {canEditTemplate ? (
+            <>
+              {mode === "personal" ? (
+                <PageActionButton
+                  onClick={() => onDelete(template)}
+                  preset="danger"
+                  size="md"
+                  leadingIcon={<Trash2 size={13} />}
+                >
+                  {t("templateManage.templateDelete")}
+                </PageActionButton>
+              ) : null}
+              <PageActionButton
+                disabled={
+                  savePending ||
+                  !resolvedDraft.title.trim() ||
+                  !templateId ||
+                  (requiresReviewNote && !resolvedDraft.review_note.trim())
+                }
+                onClick={() => onSave(template, resolvedDraft)}
+                preset="primary"
+                size="md"
+                loading={savePending}
+                leadingIcon={<Save size={13} />}
+              >
+                {t("templateManage.templateSave")}
+              </PageActionButton>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+});
+
 function TemplateManagementFeedbackDialog({
   successMessage,
   errorMessage,
@@ -693,6 +1065,7 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   const mobileCategoryDrawerButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileCategoryDrawerRestoreFocusRef = useRef(true);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, TEMPLATE_MANAGE_SEARCH_DEBOUNCE_MS);
   const [entryFilter, setEntryFilter] = useState<EntryFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
@@ -706,10 +1079,10 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   const [copyGlobalDraft, setCopyGlobalDraft] = useState<CopyGlobalDraft | null>(null);
   const [savedMessage, setSavedMessage] = useState("");
   const [error, setError] = useState("");
-  const normalizedSearch = search.trim();
+  const normalizedSearch = debouncedSearch.trim();
   const templateQueryInputs = templateManagementTemplateQueryInputs({
     mode,
-    search,
+    search: debouncedSearch,
     categoryFilter,
     entryFilter,
   });
@@ -778,15 +1151,21 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   });
   const categoriesPhase = asyncViewPhase(categoriesState);
 
-  const categories = categoriesQuery.data?.items ?? [];
-  const globalCategories = mode === "global" ? categories : [];
-  const templateItems =
-    mode === "global"
-      ? sortTemplateManagementTemplates([
-          ...(globalTemplatesQuery.data?.items ?? []),
-          ...(userTemplatesQuery.data?.items ?? []),
-        ])
-      : sortTemplateManagementTemplates(personalTemplatesQuery.data?.items ?? []);
+  const categories = categoriesQuery.data?.items ?? EMPTY_TEMPLATE_CATEGORIES;
+  const globalCategories = mode === "global" ? categories : EMPTY_TEMPLATE_CATEGORIES;
+  const personalItems = personalTemplatesQuery.data?.items;
+  const globalItems = globalTemplatesQuery.data?.items;
+  const userItems = userTemplatesQuery.data?.items;
+  const templateItems = useMemo(
+    () =>
+      mergeTemplateManagementItems({
+        mode,
+        personalItems,
+        globalItems,
+        userItems,
+      }),
+    [globalItems, mode, personalItems, userItems],
+  );
   const templates = useMemo(
     () =>
       templateItems
@@ -796,9 +1175,21 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   );
   const templatesState = combineAsyncViewStates({
     active: true,
-    critical: mode === "global" ? [globalTemplatesState, userTemplatesState] : [personalTemplatesState],
-    isEmpty: templates.length === 0,
+    critical: templateManagementListCriticalStates({
+      mode,
+      personalTemplatesState,
+      globalTemplatesState,
+    }),
+    isEmpty: templateManagementListIsEmpty({
+      mode,
+      templateCount: templates.length,
+      userTemplatesState,
+    }),
   });
+  const userTemplatesSoftError =
+    mode === "global" &&
+    globalTemplatesState.content !== "none" &&
+    userTemplatesState.error !== "none";
 
   const invalidateTemplateData = async () => {
     await queryClient.invalidateQueries({ queryKey: ["canvas-templates"] });
@@ -1004,6 +1395,54 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
     void personalTemplatesQuery.refetch();
   }
 
+  const handleDraftPatch = useCallback(
+    (templateKey: string, baseTemplate: CanvasTemplateSummary, patch: Partial<TemplateDraft>) => {
+      setTemplateDrafts((current) => {
+        const base = current[templateKey] ?? templateDraft(baseTemplate);
+        return {
+          ...current,
+          [templateKey]: { ...base, ...patch },
+        };
+      });
+    },
+    [],
+  );
+
+  const saveTemplateMutate = saveTemplateMutation.mutate;
+  const reviewTemplateMutate = reviewTemplateMutation.mutate;
+  const defaultCopyCategoryId = globalCategories[0]?.id ?? "";
+
+  const handleSaveTemplate = useCallback(
+    (template: CanvasTemplateSummary, draft: TemplateDraft) => {
+      saveTemplateMutate({ template, draft });
+    },
+    [saveTemplateMutate],
+  );
+
+  const handleDeleteTemplate = useCallback((template: CanvasTemplateSummary) => {
+    setPendingDelete({ kind: "template", id: template.key, name: template.title });
+  }, []);
+
+  const handleCopyGlobal = useCallback(
+    (template: CanvasTemplateSummary) => {
+      setCopyGlobalDraft({
+        template,
+        category_id: defaultCopyCategoryId,
+        title: template.title,
+        description: template.description ?? "",
+        sort_order: String(template.sort_order ?? 100),
+      });
+    },
+    [defaultCopyCategoryId],
+  );
+
+  const handleReviewTemplate = useCallback(
+    (template: CanvasTemplateSummary, approved: boolean) => {
+      reviewTemplateMutate({ template, approved });
+    },
+    [reviewTemplateMutate],
+  );
+
   const categoryPanel = (
     <TemplateCategoryPanel
       categories={categories}
@@ -1123,6 +1562,24 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
               </div>
             </div>
 
+            {userTemplatesSoftError ? (
+              <div
+                className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
+                role="status"
+                aria-live="off"
+              >
+                <span>{t("templateManage.loadFailed")}</span>
+                <PageActionButton
+                  preset="secondary"
+                  size="sm"
+                  className="shrink-0 text-xs"
+                  onClick={retryTemplates}
+                >
+                  {t("common.retry")}
+                </PageActionButton>
+              </div>
+            ) : null}
+
             <AsyncContent
               state={templatesState}
               refreshIntent="parameter-change"
@@ -1197,362 +1654,24 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                     : "grid gap-4 md:grid-cols-2 xl:grid-cols-3"
                 }
               >
-                {templates.map((template) => {
-                  const draft = templateDrafts[template.key] ?? templateDraft(template);
-                  const templateId = template.user_template_id ?? template.template_id ?? template.key;
-                  const isUserTemplate = template.scope === "user" && Boolean(template.user_template_id);
-                  const canEditTemplate = mode === "personal" ? isUserTemplate : template.scope === "global";
-                  const canManageAvailability = mode === "global";
-                  const requiresReviewNote =
-                    mode === "personal" && isUserTemplate && template.effective_enabled === false;
-                  return (
-                    <article
-                      key={template.key}
-                      className={`${TEMPLATE_FIELD_CARD_CLASS} overflow-hidden`}
-                    >
-                      <div className="border-b border-slate-200 dark:border-slate-700">
-                        <TemplateGraphPreview template={template} />
-                      </div>
-                      <div className="space-y-3 p-4">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:border-violet-400/35 dark:bg-violet-500/12 dark:text-violet-100">
-                            {t(ENTRY_LABEL_KEYS[template.entry_mode])}
-                          </span>
-                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
-                            {template.category_name ?? t("templateFilter.allCategories")}
-                          </span>
-                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
-                            {t("templateManage.nodeCount", { count: template.preview_nodes.length })}
-                          </span>
-                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
-                            {t("templateManage.edgeCount", { count: template.preview_edges.length })}
-                          </span>
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${templateAvailabilityClassName(template)}`}
-                          >
-                            {t(templateAvailabilityLabelKey(template))}
-                          </span>
-                          {template.owner_username ? (
-                            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-[#111b2d] dark:text-slate-300">
-                              {t("templateManage.owner", { name: template.owner_username })}
-                            </span>
-                          ) : null}
-                        </div>
-                        {template.disabled_reason ? (
-                          <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700 dark:border-red-400/25 dark:bg-red-500/10 dark:text-red-200">
-                            {t("templateManage.disabledReason", { reason: template.disabled_reason })}
-                          </div>
-                        ) : null}
-                        {template.review_note ? (
-                          <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100">
-                            {t("templateManage.reviewNote", { note: template.review_note })}
-                          </div>
-                        ) : null}
-                        {isWorkspaceSubpage ? (
-                          <WorkspaceTextInput
-                            value={draft.title}
-                            onChange={(event) =>
-                              setTemplateDrafts((current) => ({
-                                ...current,
-                                [template.key]: { ...draft, title: event.target.value },
-                              }))
-                            }
-                            readOnly={!canEditTemplate}
-                            className="font-semibold"
-                            placeholder={t("templateManage.templateTitle")}
-                            maxLength={255}
-                          />
-                        ) : (
-                          <ClassicTextInput
-                            value={draft.title}
-                            onChange={(event) =>
-                              setTemplateDrafts((current) => ({
-                                ...current,
-                                [template.key]: { ...draft, title: event.target.value },
-                              }))
-                            }
-                            readOnly={!canEditTemplate}
-                            className="font-semibold"
-                            placeholder={t("templateManage.templateTitle")}
-                            maxLength={255}
-                          />
-                        )}
-                        {isWorkspaceSubpage ? (
-                          <WorkspaceTextarea
-                            value={draft.description}
-                            onChange={(event) =>
-                              setTemplateDrafts((current) => ({
-                                ...current,
-                                [template.key]: { ...draft, description: event.target.value },
-                              }))
-                            }
-                            readOnly={!canEditTemplate}
-                            className="min-h-20 resize-y"
-                            placeholder={t("templateManage.templateDescription")}
-                            maxLength={1000}
-                          />
-                        ) : (
-                          <ClassicTextarea
-                            value={draft.description}
-                            onChange={(event) =>
-                              setTemplateDrafts((current) => ({
-                                ...current,
-                                [template.key]: { ...draft, description: event.target.value },
-                              }))
-                            }
-                            readOnly={!canEditTemplate}
-                            className="min-h-20"
-                            placeholder={t("templateManage.templateDescription")}
-                            maxLength={1000}
-                          />
-                        )}
-                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
-                          {isWorkspaceSubpage ? (
-                            <WorkspaceSelectField
-                              value={draft.category_id}
-                              options={[
-                                { value: "", label: t("templateFilter.allCategories") },
-                                ...categories.map((category) => ({ value: category.id, label: category.name })),
-                              ]}
-                              onChange={(value) =>
-                                setTemplateDrafts((current) => ({
-                                  ...current,
-                                  [template.key]: { ...draft, category_id: value },
-                                }))
-                              }
-                              ariaLabel={t("templateManage.templateCategory")}
-                              size="compact"
-                              disabled={!canEditTemplate || !categoriesResolved}
-                            />
-                          ) : (
-                            <ClassicSelectField
-                              value={draft.category_id}
-                              options={[
-                                { value: "", label: t("templateFilter.allCategories") },
-                                ...categories.map((category) => ({ value: category.id, label: category.name })),
-                              ]}
-                              onChange={(value) =>
-                                setTemplateDrafts((current) => ({
-                                  ...current,
-                                  [template.key]: { ...draft, category_id: value },
-                                }))
-                              }
-                              ariaLabel={t("templateManage.templateCategory")}
-                              radius="lg"
-                              size="compact"
-                              disabled={!canEditTemplate || !categoriesResolved}
-                            />
-                          )}
-                          {isWorkspaceSubpage ? (
-                            <WorkspaceTextInput
-                              type="number"
-                              value={draft.sort_order}
-                              onChange={(event) =>
-                                setTemplateDrafts((current) => ({
-                                  ...current,
-                                  [template.key]: { ...draft, sort_order: event.target.value },
-                                }))
-                              }
-                              readOnly={!canEditTemplate}
-                              size="compact"
-                              className="h-9"
-                              placeholder={t("templateManage.templateSort")}
-                            />
-                          ) : (
-                            <ClassicTextInput
-                              type="number"
-                              value={draft.sort_order}
-                              onChange={(event) =>
-                                setTemplateDrafts((current) => ({
-                                  ...current,
-                                  [template.key]: { ...draft, sort_order: event.target.value },
-                                }))
-                              }
-                              readOnly={!canEditTemplate}
-                              size="compact"
-                              placeholder={t("templateManage.templateSort")}
-                            />
-                          )}
-                        </div>
-                        {canManageAvailability ? (
-                          <div className={`${TEMPLATE_FIELD_CARD_CLASS} space-y-2 px-3 py-2`}>
-                            {isWorkspaceSubpage ? (
-                              <WorkspaceCheckbox
-                                checked={draft.enabled}
-                                onChange={(event) =>
-                                  setTemplateDrafts((current) => ({
-                                    ...current,
-                                    [template.key]: { ...draft, enabled: event.target.checked },
-                                  }))
-                                }
-                                wrapperClassName="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"
-                              >
-                                {t("templateManage.templateEnabled")}
-                              </WorkspaceCheckbox>
-                            ) : (
-                              <ClassicCheckbox
-                                checked={draft.enabled}
-                                onChange={(event) =>
-                                  setTemplateDrafts((current) => ({
-                                    ...current,
-                                    [template.key]: { ...draft, enabled: event.target.checked },
-                                  }))
-                                }
-                                wrapperClassName="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"
-                              >
-                                {t("templateManage.templateEnabled")}
-                              </ClassicCheckbox>
-                            )}
-                            {!draft.enabled ? (
-                              isWorkspaceSubpage ? (
-                                <WorkspaceTextarea
-                                  value={draft.disabled_reason}
-                                  onChange={(event) =>
-                                    setTemplateDrafts((current) => ({
-                                      ...current,
-                                      [template.key]: { ...draft, disabled_reason: event.target.value },
-                                    }))
-                                  }
-                                  size="compact"
-                                  className="min-h-16 resize-y text-xs leading-5"
-                                  placeholder={t("templateManage.disabledReasonPlaceholder")}
-                                  maxLength={1000}
-                                />
-                              ) : (
-                                <ClassicTextarea
-                                  value={draft.disabled_reason}
-                                  onChange={(event) =>
-                                    setTemplateDrafts((current) => ({
-                                      ...current,
-                                      [template.key]: { ...draft, disabled_reason: event.target.value },
-                                    }))
-                                  }
-                                  size="compact"
-                                  className="min-h-16 text-xs leading-5"
-                                  placeholder={t("templateManage.disabledReasonPlaceholder")}
-                                  maxLength={1000}
-                                />
-                              )
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {requiresReviewNote ? (
-                          isWorkspaceSubpage ? (
-                            <WorkspaceTextarea
-                              value={draft.review_note}
-                              onChange={(event) =>
-                                setTemplateDrafts((current) => ({
-                                  ...current,
-                                  [template.key]: { ...draft, review_note: event.target.value },
-                                }))
-                              }
-                              size="compact"
-                              className="min-h-16 resize-y border-amber-200 bg-amber-50 text-xs leading-5 text-amber-950 focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
-                              placeholder={t("templateManage.reviewNotePlaceholder")}
-                              maxLength={1000}
-                            />
-                          ) : (
-                            <ClassicTextarea
-                              value={draft.review_note}
-                              onChange={(event) =>
-                                setTemplateDrafts((current) => ({
-                                  ...current,
-                                  [template.key]: { ...draft, review_note: event.target.value },
-                                }))
-                              }
-                              size="compact"
-                              className="min-h-16 border-amber-200 bg-amber-50 text-xs leading-5 text-amber-950 focus:border-amber-400 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100"
-                              placeholder={t("templateManage.reviewNotePlaceholder")}
-                              maxLength={1000}
-                            />
-                          )
-                        ) : null}
-                        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
-                          {mode === "global" && isUserTemplate ? (
-                            <PageActionButton
-                              onClick={() =>
-                                setCopyGlobalDraft({
-                                  template,
-                                  category_id: globalCategories[0]?.id ?? "",
-                                  title: template.title,
-                                  description: template.description ?? "",
-                                  sort_order: String(template.sort_order ?? 100),
-                                })
-                              }
-                              preset="secondary"
-                              size="md"
-                              disabled={!categoriesResolved}
-                              leadingIcon={<CopyPlus size={13} />}
-                            >
-                              {t("templateManage.copyGlobal")}
-                            </PageActionButton>
-                          ) : null}
-                          {mode === "global" && isUserTemplate && template.review_status === "pending" ? (
-                            <>
-                              <PageActionButton
-                                disabled={reviewTemplateMutation.isPending || !templateId}
-                                onClick={() => reviewTemplateMutation.mutate({ template, approved: false })}
-                                preset="secondary"
-                                size="md"
-                              >
-                                {t("templateManage.reviewReject")}
-                              </PageActionButton>
-                              <PageActionButton
-                                disabled={reviewTemplateMutation.isPending || !templateId}
-                                onClick={() => reviewTemplateMutation.mutate({ template, approved: true })}
-                                preset="primary"
-                                size="md"
-                              >
-                                {t("templateManage.reviewApprove")}
-                              </PageActionButton>
-                            </>
-                          ) : null}
-                          {canManageAvailability && !canEditTemplate ? (
-                            <PageActionButton
-                              disabled={saveTemplateMutation.isPending || !templateId}
-                              onClick={() => saveTemplateMutation.mutate({ template, draft })}
-                              preset="primary"
-                              size="md"
-                              loading={saveTemplateMutation.isPending}
-                              leadingIcon={<Save size={13} />}
-                            >
-                              {t("templateManage.templateSave")}
-                            </PageActionButton>
-                          ) : null}
-                          {canEditTemplate ? (
-                            <>
-                              {mode === "personal" ? (
-                                <PageActionButton
-                                  onClick={() => setPendingDelete({ kind: "template", id: template.key, name: template.title })}
-                                  preset="danger"
-                                  size="md"
-                                  leadingIcon={<Trash2 size={13} />}
-                                >
-                                  {t("templateManage.templateDelete")}
-                                </PageActionButton>
-                              ) : null}
-                              <PageActionButton
-                                disabled={
-                                  saveTemplateMutation.isPending ||
-                                  !draft.title.trim() ||
-                                  !templateId ||
-                                  (requiresReviewNote && !draft.review_note.trim())
-                                }
-                                onClick={() => saveTemplateMutation.mutate({ template, draft })}
-                                preset="primary"
-                                size="md"
-                                loading={saveTemplateMutation.isPending}
-                                leadingIcon={<Save size={13} />}
-                              >
-                                {t("templateManage.templateSave")}
-                              </PageActionButton>
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
+                {templates.map((template) => (
+                  <TemplateManageCard
+                    key={template.key}
+                    template={template}
+                    draft={templateDrafts[template.key]}
+                    mode={mode}
+                    categories={categories}
+                    categoriesResolved={categoriesResolved}
+                    isWorkspaceSubpage={isWorkspaceSubpage}
+                    savePending={saveTemplateMutation.isPending}
+                    reviewPending={reviewTemplateMutation.isPending}
+                    onDraftPatch={handleDraftPatch}
+                    onSave={handleSaveTemplate}
+                    onDelete={handleDeleteTemplate}
+                    onCopyGlobal={handleCopyGlobal}
+                    onReview={handleReviewTemplate}
+                  />
+                ))}
               </div>
             </AsyncContent>
             </div>

@@ -15,7 +15,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { memo, useEffect, useId, useRef, useState } from "react";
 
 import { ModalShell } from "../../components/ModalShell";
 import {
@@ -311,15 +311,18 @@ function edgePath(source: PreviewNode, target: PreviewNode, metrics: TemplatePre
   return `M ${sourceX} ${source.centerY} C ${sourceControlX} ${source.centerY}, ${targetControlX} ${target.centerY}, ${targetX} ${target.centerY}`;
 }
 
-export function TemplateGraphPreview({
+export const TemplateGraphPreview = memo(function TemplateGraphPreview({
   template,
   variant = "panel",
+  localized = false,
 }: {
   template: CanvasTemplateSummary;
   variant?: "panel" | "dialog";
+  /** When true, skip internal localization (caller already localized). */
+  localized?: boolean;
 }) {
   const { locale, t } = useI18n();
-  const displayTemplate = localizeCanvasTemplateSummary(template, locale);
+  const displayTemplate = localized ? template : localizeCanvasTemplateSummary(template, locale);
   const metrics = variant === "dialog" ? dialogPreviewMetricsForTemplate(displayTemplate) : PREVIEW_METRICS;
   const layout = buildTemplatePreviewLayout(displayTemplate, metrics);
   if (layout === null) {
@@ -442,7 +445,7 @@ export function TemplateGraphPreview({
       })}
     </div>
   );
-}
+});
 
 function CompactTemplateGraphPreview({
   template,
@@ -662,7 +665,7 @@ function TemplatePreviewDialog({
             }
           }}
         >
-          <TemplateGraphPreview template={displayTemplate} variant="dialog" />
+          <TemplateGraphPreview template={displayTemplate} variant="dialog" localized />
         </div>
     </ModalShell>
   );
