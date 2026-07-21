@@ -737,6 +737,7 @@ export const zhCN = {
   "templateManage.categorySave": "保存分类",
   "templateManage.categoryDelete": "移除分类",
   "templateManage.categoryEmpty": "暂无分类",
+  "templateManage.categoryCount": "{count} 个分类",
   "templateManage.templatePanel": "模板列表",
   "templateManage.templateTitle": "模板名称",
   "templateManage.templateDescription": "描述",

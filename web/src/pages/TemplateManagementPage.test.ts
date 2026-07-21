@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { CanvasTemplateSummary } from "../lib/types";
 import {
+  shouldUseDesktopTemplateCategoryRail,
   sortTemplateManagementTemplates,
+  TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY,
   templateManagementInitialWorkflowEntry,
   templateManagementTemplateQueryInputs,
 } from "./TemplateManagementPage";
@@ -52,6 +54,14 @@ function templateSummary(
 }
 
 describe("TemplateManagementPage helpers", () => {
+  it("uses the 1024px desktop breakpoint for the category rail", () => {
+    expect(TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY).toBe("(min-width: 1024px)");
+    expect(shouldUseDesktopTemplateCategoryRail((query) => query === TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY)).toBe(
+      true,
+    );
+    expect(shouldUseDesktopTemplateCategoryRail(() => false)).toBe(false);
+  });
+
   it("maps the all entry filter to an omitted workflow entry", () => {
     expect(templateManagementInitialWorkflowEntry("all")).toBeUndefined();
     expect(templateManagementInitialWorkflowEntry("image")).toBe("image");

@@ -149,7 +149,6 @@ const OBJECTIVE_PAGE_SOURCES_WITHOUT_RAW_BUTTONS = [
   { file: "./GalleryPage.tsx", source: galleryPageSource },
   { file: "./EnhancePage.tsx", source: enhancePageSource },
   { file: "./ImageToCodePage.tsx", source: imageToCodePageSource },
-  { file: "./TemplateManagementPage.tsx", source: templateManagementPageSource },
   { file: "./StatusPage.tsx", source: statusPageSource },
   { file: "./UsageStatsPage.tsx", source: usageStatsPageSource },
   { file: "./SettingsPage.tsx", source: settingsPageSource },
@@ -626,6 +625,15 @@ describe("button layout boundaries for shared classic/workspace pages", () => {
     expect(countPattern(resourceLibraryPageSource, /<button\b/g)).toBe(3);
     expect(resourceLibraryPageSource).toContain("pf-resource-library-group-nav-item");
     expect(resourceLibraryPageSource).toContain("pf-resource-library-mobile-groups-trigger");
+  });
+
+  it("./TemplateManagementPage.tsx keeps only navigation raw buttons after category rail", () => {
+    expect(countPattern(templateManagementPageSource, /<button\b/g)).toBe(3);
+    expect(templateManagementPageSource).toContain("pf-resource-library-group-nav-item");
+    expect(templateManagementPageSource).toContain("pf-resource-library-mobile-groups-trigger");
+    expect(templateManagementPageSource).toContain('aria-current={!categoryFilter ? "page" : undefined}');
+    expect(templateManagementPageSource).toContain('aria-current={selected ? "page" : undefined}');
+    expect(templateManagementPageSource).not.toContain("actionSurfaceClassNameForAppearance");
   });
 
   it("./HelpPage.tsx keeps only navigation raw buttons after button refactor", () => {

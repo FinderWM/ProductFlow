@@ -444,6 +444,15 @@
 - Personal template management filters user templates by entry/category/search and can edit title, description, category,
   sort, status visibility, disabled reason, review note, and archival according to role. Global template management can
   edit global templates and use user templates as copy sources.
+- Template management layout (`TemplateManagementPage`, personal + global):
+  - Desktop (`min-width: 1024px` / `lg+`): classic uses `pf-page pf-page-wide` with
+    `lg:grid-cols-[280px_minmax(0,1fr)]` (sticky 280px rail); workspace keeps `pf-side-shell`. Category list stays inline.
+    Classic template cards densify `md:grid-cols-2 xl:grid-cols-3`; workspace cards stay `lg:grid-cols-2`.
+  - Compact (`<1024px`): do not stack the long category-management list above templates. Show search/entry/category filters
+    on the main column; expose category view/CRUD through a left floating trigger + left drawer (resource-library group-rail
+    pattern). Selecting a category (or all categories) updates `categoryFilter` and closes the drawer; restore focus to the
+    trigger. Category rows are page-level nav (`aria-current="page"`), not action buttons.
+  - Classic vs workspace control families stay branched for filter strip, category editor, and drawer actions.
 - In global template management, a global category filter must not hide user templates that are only available as copy
   sources; apply the category filter to global templates while keeping user templates visible for copying.
 - Disabled personal templates can be edited by their owner only with a modification note; after submit the row is marked
@@ -526,16 +535,19 @@ useQuery({
     }),
 });
 ```
+
 - Do not duplicate the backend template catalog in InspirationDetail. The page may use merchant-facing labels from the API,
   but the submitted `template_key` must be the backend-recognized key.
 
 ### Keyboard Shortcuts and Undo/Redo
 
 #### 1. Scope / Trigger
+
 - Trigger: InspirationDetail changes to keyboard handling, selected node groups, copy/paste, delete shortcuts, or undo/redo.
 - Shortcuts are local workbench interactions on top of persisted workflow mutations.
 
 #### 2. Signatures
+
 - Copy: `Ctrl/Cmd+C` stores the current selected node ids in page memory.
 - Paste: `Ctrl/Cmd+V` calls `api.duplicateWorkflowNodeGroup(inspirationId, ...)`.
 - Duplicate: `Ctrl/Cmd+D` copies and immediately duplicates the current selected group.
@@ -545,6 +557,7 @@ useQuery({
 - Backend duplicate endpoint: `POST /api/inspirations/{inspiration_id}/workflow/node-groups/duplicate`.
 
 #### 3. Contracts
+
 - Shortcut handling must ignore events from `input`, `textarea`, `select`, `button`, `a`, labels, role buttons,
   contenteditable elements, and node/action controls where text editing or normal browser commands should win.
 - Shortcuts operate on the current `selectedNodeIds`; no selection means no destructive action.
@@ -558,6 +571,7 @@ useQuery({
   state, workflow run rows, generated copy, generated images, or artifact ids/URLs/paths.
 
 #### 4. Validation & Error Matrix
+
 - Shortcut from editable target -> do nothing and do not prevent the user's text operation.
 - Delete with no selected nodes -> do nothing.
 - Paste with empty clipboard -> do nothing or show a concise local notice; do not call the backend.
@@ -566,6 +580,7 @@ useQuery({
 - Undo/redo mutation failure -> show `ApiError.detail` and keep the page consistent with the latest query data.
 
 #### 5. Good/Base/Bad Cases
+
 - Good: select a copy/image/reference chain, press `Ctrl/Cmd+D`, and see a new selected chain with internal edges.
 - Good: delete selected nodes with confirmation, then undo and get fresh idle/configured nodes without old outputs.
 - Base: pressing `Ctrl/Cmd+C` inside an inspector text field uses normal text copy and does not replace the canvas
@@ -574,6 +589,7 @@ useQuery({
 - Bad: undoing deletion by writing old `output_json` back into a node, which makes stale generated artifacts look valid.
 
 #### 6. Tests Required
+
 - Pure helper tests for shortcut target filtering and shortcut key classification.
 - Pure helper tests for undo/redo inverse-action stack behavior and artifact-field sanitization.
 - InspirationDetail or focused tests that delete and destructive undo/redo request confirmation.
@@ -807,12 +823,14 @@ pending state for individual node run actions, while keeping layout dragging ind
 ## Scenario: Inspiration canvas gallery modal
 
 ### 1. Scope / Trigger
+
 - Trigger: editing `InspirationDetailPage`, `pages/inspiration-detail/ImagesPanel.tsx`, image preview/download helpers,
   reference-node fill actions, or personal resource-library save actions exposed from the canvas gallery.
 - This scope is the current inspiration's derived gallery only. It is not the global `/gallery` page and must not inherit
   global gallery filters or management behavior.
 
 ### 2. Signatures
+
 - Entry state: `InspirationDetailPage` uses `galleryOpen` and opens `ImagesPanel` directly from the canvas Images/Gallery
   sidebar action.
 - Component: `ImagesPanel({ open, onClose, inspiration, posters, referenceAssets, ... })`.
@@ -822,6 +840,7 @@ pending state for individual node run actions, while keeping layout dragging ind
   `api.bindWorkflowNodeImage(nodeId, { poster_variant_id })`.
 
 ### 3. Contracts
+
 - The canvas gallery opens as a page-level modal, not as an inline right-toolbar grid and not through a second nested
   "open gallery" button.
 - The modal is scoped to the current inspiration. It must not render a supplier/provider/generated resource-group filter.
@@ -833,6 +852,7 @@ pending state for individual node run actions, while keeping layout dragging ind
   canvas modal.
 
 ### 4. Validation & Error Matrix
+
 - Clicking the canvas Images/Gallery entry -> `galleryOpen=true` and a modal with the current inspiration images appears.
 - No selected `reference_image` node -> preview/download still work, fill action is disabled with the existing select-node
   hint.
@@ -841,6 +861,7 @@ pending state for individual node run actions, while keeping layout dragging ind
   boundary; the modal is no longer scoped to current inspiration data.
 
 ### 5. Good/Base/Bad Cases
+
 - Good: `ImagesPanel` receives already-derived `posters` and `referenceAssets` from `InspirationDetailPage`.
 - Good: each card can preview, download, fill the selected reference node, and save that one image to resource library.
 - Base: generated image cards may show their source generation group as passive metadata.
@@ -848,6 +869,7 @@ pending state for individual node run actions, while keeping layout dragging ind
 - Bad: placing the resource-library picker under the canvas gallery button instead of under image upload/selection slots.
 
 ### 6. Tests Required
+
 - Frontend build must type-check `ImagesPanel` props whenever the modal contract changes.
 - Images-tab regressions should cover direct modal open/close, absence of resource-group/provider filters, preview action,
   reference fill for both source assets and poster variants, and per-card save-to-resource-library action.
@@ -889,10 +911,12 @@ Canvas gallery content is derived locally from the current inspiration.
 ## Scenario: Tail splitter confirmation UX
 
 ### 1. Scope / Trigger
+
 - Trigger: InspirationDetail changes that introduce `tail_splitter` nodes, tail split-plan preview/apply flows, workflow run
   modes, or waiting-confirmation status displays.
 
 ### 2. Signatures
+
 - `WorkflowNode.node_type` includes `tail_splitter`.
 - `WorkflowRun.status` includes `waiting_confirmation`.
 - `WorkflowRunStartMode = "from_node" | "after_node"`.
@@ -913,6 +937,7 @@ Canvas gallery content is derived locally from the current inspiration.
   can say `最多拆分数` / max split items, and helper text should clarify the actual count depends on content.
 
 ### 3. Contracts
+
 - InspirationDetail must expose tail nodes as first-class ordinary nodes in add-node, node labels, iconography, and inspector.
 - Node toolbars should expose two run actions for single nodes: `运行此节点` and
   `从此节点开始运行后面的节点`. The downstream action submits `start_mode="after_node"` and does not rerun
@@ -948,6 +973,7 @@ Canvas gallery content is derived locally from the current inspiration.
   near the action that failed.
 
 ### 4. Validation & Error Matrix
+
 - Tail apply called with stale/non-pending plan -> show backend detail and keep dialog open for user correction/refresh.
 - Tail apply called with zero selected items -> prevent submit locally or show backend validation detail.
 - Tail apply called with a blank edited instruction -> show backend detail and keep the user's draft visible.
@@ -958,6 +984,7 @@ Canvas gallery content is derived locally from the current inspiration.
 - User lacks `inspirations:generate` -> run action returns `403`; InspirationDetail shows permission error on run controls.
 
 ### 5. Good/Base/Bad Cases
+
 - Good: user runs tail, edits one plan-item instruction, deselects another item, confirms, and only selected image branches
   are created with edited instructions while remaining idle for review/editing.
 - Good: user reruns a tail node, keeps the previous shared copy/reference checkboxes selected, confirms the new plan, and
@@ -972,6 +999,7 @@ Canvas gallery content is derived locally from the current inspiration.
 - Bad: treating `waiting_confirmation` as terminal and stopping status polling while the run is still cancelable.
 
 ### 6. Tests Required
+
 - `defaultConfigForType("tail_splitter")` and node label/icon/display contract tests.
 - InspirationDetail helper tests for `运行此节点` and downstream-run toolbar actions.
 - InspirationDetail tests for pending-plan dialog open/cancel/confirm, edited-instruction payload, and selected-item payload.
@@ -1010,15 +1038,18 @@ does not start generated nodes automatically.
 ## Scenario: Autosaved direct image workbench
 
 ### 1. Scope / Trigger
+
 - Trigger: InspirationDetail workbench changes for image-node execution, autosave, panel sizing, or canvas zoom.
 
 ### 2. Signatures
+
 - `api.listProducts({ page, page_size })` drives paginated inspiration lists and returns thumbnail URLs.
 - `api.runInspirationWorkflow(inspirationId, { start_node_id })` may target an image node whose only required upstream is inspiration
   context.
 - Local UI persistence keys: `inspiration-one.workflow.zoom` and `inspiration-one.workflow.inspectorWidth`.
 
 ### 3. Contracts
+
 - The add-node toolbar must not expose `inspiration_context`; one inspiration context exists per active workflow.
 - Node draft edits debounce-save through `updateWorkflowNode(...)`; run-all and run-selected must flush the selected draft
   before calling `runInspirationWorkflow(...)`.
@@ -1040,11 +1071,13 @@ does not start generated nodes automatically.
   vertical working space.
 
 ### 4. Validation & Error Matrix
+
 - Autosave error -> show local `ApiError.detail`, keep user draft visible, and allow explicit retry/save.
 - Run clicked while selected draft is dirty -> save first; if save fails, do not run stale config.
 - Zoomed canvas drag -> persisted `position_x` / `position_y` are unscaled workflow coordinates.
 
 ### 5. Good/Base/Bad Cases
+
 - Good: edit image instruction, immediately click run, and backend receives the new instruction.
 - Base: resize the right sidebar, refresh, and see the same local width.
 - Base: pan or zoom the canvas and the zoom controls stay visually anchored over the canvas viewport.
@@ -1052,10 +1085,12 @@ does not start generated nodes automatically.
 - Bad: placing zoom controls in the top toolbar or scrollable canvas flow so they move with workflow content.
 
 ### 6. Tests Required
+
 - `just web-build` for DTO/type compatibility.
 - Backend API tests for direct image-node run and singleton inspiration context, because frontend relies on those contracts.
 
 ### 7. Wrong vs Correct
+
 #### Wrong
 
 ```tsx

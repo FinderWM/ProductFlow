@@ -50,9 +50,14 @@ Contract:
 - Shell names are not layout proof. `pf-workspace`, `pf-workspace-subpage`, `pf-side-shell`, a workbench directory, or an
   immersive visual shell can still render while the root scheme is classic.
 - Side-rail or left-column navigation entries remain navigation even when they are clickable and visually prominent.
-  Settings sections, help doc page entries, and resource-library group rails must stay on page-level navigation classes
-  with `aria-current`, not on `ClassicActionButton`, `WorkspaceActionButton`, `LayoutActionSurfaceButton`, or other
-  action-button helpers.
+  Settings sections, help doc page entries, resource-library group rails, and template-management category rails must stay
+  on page-level navigation classes with `aria-current="page"`, not on `ClassicActionButton`, `WorkspaceActionButton`,
+  `LayoutActionSurfaceButton`, or other action-button helpers. Edit/delete icons beside a nav row remain action buttons.
+- Compact viewport side rails (`<lg` / `min-width: 1024px` false) that would otherwise stack long group/category lists above
+  primary content should use a left floating trigger + left drawer, matching resource-library groups and template-management
+  categories. Keep primary filters on the main column when the rail holds more than navigation. Classic and workspace branches
+  must still pick control families from the matrix below; drawer chrome may reuse tokenized `pf-resource-library-mobile-groups-*`
+  surfaces, but inputs/actions inside remain layout-specific.
 
 Required family matrix:
 

@@ -739,6 +739,7 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "templateManage.categorySave": "カテゴリを保存",
   "templateManage.categoryDelete": "カテゴリを非表示",
   "templateManage.categoryEmpty": "カテゴリなし",
+  "templateManage.categoryCount": "{count} 件のカテゴリ",
   "templateManage.templatePanel": "テンプレート一覧",
   "templateManage.templateTitle": "テンプレート名",
   "templateManage.templateDescription": "説明",

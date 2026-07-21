@@ -739,6 +739,7 @@ export const enUS: Record<keyof typeof zhCN, string> = {
   "templateManage.categorySave": "Save category",
   "templateManage.categoryDelete": "Remove category",
   "templateManage.categoryEmpty": "No categories",
+  "templateManage.categoryCount": "{count} categories",
   "templateManage.templatePanel": "Templates",
   "templateManage.templateTitle": "Template title",
   "templateManage.templateDescription": "Description",

@@ -1,5 +1,6 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Drawer } from "vaul";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -26,7 +27,7 @@ import {
   type LayoutActionAppearance,
 } from "../components/layoutActionButtons";
 import { AsyncContent, AsyncErrorState, AsyncPausedState } from "../components/loading/AsyncContent";
-import { SkeletonCards, SkeletonRows } from "../components/loading/Skeleton";
+import { Skeleton, SkeletonCards, SkeletonRows, SkeletonText } from "../components/loading/Skeleton";
 import { ModalShell } from "../components/ModalShell";
 import { TopNav } from "../components/TopNav";
 import {
@@ -40,6 +41,7 @@ import {
   asyncViewPhase,
   asyncViewStateFromQuery,
   combineAsyncViewStates,
+  type AsyncViewState,
 } from "../lib/asyncViewState";
 import { localizeCanvasTemplateSummary } from "../lib/canvasTemplateLocalization";
 import type { TranslationKey } from "../lib/i18n";
@@ -100,6 +102,14 @@ const TEMPLATE_PANEL_CLASS =
 const TEMPLATE_FIELD_CARD_CLASS =
   "pf-settings-field-card rounded-xl border border-slate-200 bg-slate-50/70 shadow-none dark:border-slate-700 dark:bg-[#0b1220]";
 const TEMPLATE_FEEDBACK_AUTO_DISMISS_MS = 1000;
+export const TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY = "(min-width: 1024px)";
+
+export function shouldUseDesktopTemplateCategoryRail(
+  mediaMatches: (query: string) => boolean = (query) =>
+    typeof window !== "undefined" && Boolean(window.matchMedia?.(query).matches),
+): boolean {
+  return mediaMatches(TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY);
+}
 const TEMPLATE_ENTRY_SORT_ORDER: Record<CanvasTemplateEntryMode, number> = {
   image: 0,
   copy: 1,
@@ -261,6 +271,340 @@ function templateAvailabilityClassName(template: CanvasTemplateSummary): string 
   return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200";
 }
 
+function TemplateFilterStrip({
+  search,
+  entryFilter,
+  categoryFilter,
+  categories,
+  categoriesResolved,
+  isWorkspaceSubpage,
+  onSearchChange,
+  onEntryFilterChange,
+  onCategoryFilterChange,
+}: {
+  search: string;
+  entryFilter: EntryFilter;
+  categoryFilter: string;
+  categories: CanvasTemplateCategory[];
+  categoriesResolved: boolean;
+  isWorkspaceSubpage: boolean;
+  onSearchChange: (value: string) => void;
+  onEntryFilterChange: (value: EntryFilter) => void;
+  onCategoryFilterChange: (value: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <section className={TEMPLATE_PANEL_CLASS}>
+      <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateFilter.search")}</h2>
+      <div className="mt-4 space-y-3">
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
+            {t("templateFilter.search")}
+          </span>
+          <span className="relative block">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            {isWorkspaceSubpage ? (
+              <WorkspaceTextInput
+                value={search}
+                onChange={(event) => onSearchChange(event.target.value)}
+                className="pl-9"
+                placeholder={t("templateFilter.searchPlaceholder")}
+              />
+            ) : (
+              <ClassicTextInput
+                value={search}
+                onChange={(event) => onSearchChange(event.target.value)}
+                className="pl-9"
+                placeholder={t("templateFilter.searchPlaceholder")}
+              />
+            )}
+          </span>
+        </label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block min-w-0">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {t("templateManage.entry")}
+            </span>
+            {isWorkspaceSubpage ? (
+              <WorkspaceSelectField
+                value={entryFilter}
+                options={ENTRY_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+                onChange={(value) => onEntryFilterChange(value as EntryFilter)}
+                size="default"
+              />
+            ) : (
+              <ClassicSelectField
+                value={entryFilter}
+                options={ENTRY_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+                onChange={(value) => onEntryFilterChange(value as EntryFilter)}
+                radius="lg"
+              />
+            )}
+          </label>
+          <label className="block min-w-0">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
+              {t("templateFilter.category")}
+            </span>
+            {isWorkspaceSubpage ? (
+              <WorkspaceSelectField
+                value={categoryFilter}
+                options={[
+                  { value: "", label: t("templateFilter.allCategories") },
+                  ...categories.map((category) => ({ value: category.id, label: category.name })),
+                ]}
+                onChange={onCategoryFilterChange}
+                size="default"
+                disabled={!categoriesResolved}
+              />
+            ) : (
+              <ClassicSelectField
+                value={categoryFilter}
+                options={[
+                  { value: "", label: t("templateFilter.allCategories") },
+                  ...categories.map((category) => ({ value: category.id, label: category.name })),
+                ]}
+                onChange={onCategoryFilterChange}
+                radius="lg"
+                disabled={!categoriesResolved}
+              />
+            )}
+          </label>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function templateCategoryNavButtonClassName(active: boolean, extraClassName = "") {
+  return `pf-resource-library-group-nav-item flex min-h-10 w-full items-center px-3 py-2 text-left text-sm ${
+    active ? "font-semibold text-slate-950 dark:text-white" : "text-slate-500 dark:text-slate-400"
+  } ${extraClassName}`.trim();
+}
+
+function TemplateCategoryPanel({
+  categories,
+  categoriesState,
+  categoriesResolved,
+  categoryFilter,
+  categoryEditorOpen,
+  categoryEditor,
+  saveCategoryPending,
+  isWorkspaceSubpage,
+  surfaceClassName,
+  compactHeader = false,
+  onCategoryFilterChange,
+  onCategoryEditorChange,
+  onCategoryEditorOpenChange,
+  onSaveCategory,
+  onDeleteCategory,
+  onRetryCategories,
+}: {
+  categories: CanvasTemplateCategory[];
+  categoriesState: AsyncViewState;
+  categoriesResolved: boolean;
+  categoryFilter: string;
+  categoryEditorOpen: boolean;
+  categoryEditor: CategoryDraft;
+  saveCategoryPending: boolean;
+  isWorkspaceSubpage: boolean;
+  surfaceClassName?: string;
+  compactHeader?: boolean;
+  onCategoryFilterChange: (categoryId: string) => void;
+  onCategoryEditorChange: (draft: CategoryDraft) => void;
+  onCategoryEditorOpenChange: (open: boolean) => void;
+  onSaveCategory: () => void;
+  onDeleteCategory: (category: CanvasTemplateCategory) => void;
+  onRetryCategories: () => void;
+}) {
+  const { t } = useI18n();
+  const PageActionButton = templateActionButtonComponent(isWorkspaceSubpage);
+  const selectedCategory = categories.find((category) => category.id === categoryFilter) ?? null;
+  const categoryActionsClassName =
+    "absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 " +
+    (compactHeader
+      ? ""
+      : "pointer-events-none opacity-0 transition-opacity duration-150 " +
+        "group-hover/template-category-row:pointer-events-auto group-hover/template-category-row:opacity-100 " +
+        "group-focus-within/template-category-row:pointer-events-auto group-focus-within/template-category-row:opacity-100");
+
+  return (
+    <section className={surfaceClassName ?? TEMPLATE_PANEL_CLASS}>
+      <div className={`flex items-center gap-3 ${compactHeader ? "justify-end" : "justify-between"}`}>
+        {compactHeader ? null : (
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateManage.categoryPanel")}</h2>
+            <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+              {(selectedCategory ? selectedCategory.name : t("templateFilter.allCategories")) +
+                " · " +
+                t("templateManage.categoryCount", { count: categories.length })}
+            </p>
+          </div>
+        )}
+        <PageActionButton
+          onClick={() => {
+            onCategoryEditorChange(categoryDraft());
+            onCategoryEditorOpenChange(true);
+          }}
+          preset="primary"
+          size="md"
+          disabled={!categoriesResolved}
+          leadingIcon={<Plus size={13} />}
+          fullWidth={compactHeader}
+        >
+          {t("templateManage.categoryCreate")}
+        </PageActionButton>
+      </div>
+      {categoryEditorOpen ? (
+        <form
+          className={`${TEMPLATE_FIELD_CARD_CLASS} mt-4 grid gap-3 p-3`}
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSaveCategory();
+          }}
+        >
+          {isWorkspaceSubpage ? (
+            <>
+              <WorkspaceTextInput
+                value={categoryEditor.name}
+                onChange={(event) => onCategoryEditorChange({ ...categoryEditor, name: event.target.value })}
+                size="default"
+                placeholder={t("templateManage.categoryName")}
+                maxLength={120}
+              />
+              <WorkspaceTextInput
+                type="number"
+                value={categoryEditor.sort_order}
+                onChange={(event) => onCategoryEditorChange({ ...categoryEditor, sort_order: event.target.value })}
+                size="default"
+                placeholder={t("templateManage.categorySort")}
+              />
+            </>
+          ) : (
+            <>
+              <ClassicTextInput
+                value={categoryEditor.name}
+                onChange={(event) => onCategoryEditorChange({ ...categoryEditor, name: event.target.value })}
+                placeholder={t("templateManage.categoryName")}
+                maxLength={120}
+              />
+              <ClassicTextInput
+                type="number"
+                value={categoryEditor.sort_order}
+                onChange={(event) => onCategoryEditorChange({ ...categoryEditor, sort_order: event.target.value })}
+                placeholder={t("templateManage.categorySort")}
+              />
+            </>
+          )}
+          <div className="flex justify-end gap-2">
+            <PageActionButton onClick={() => onCategoryEditorOpenChange(false)} preset="secondary" size="sm">
+              {t("common.cancel")}
+            </PageActionButton>
+            <PageActionButton
+              type="submit"
+              disabled={saveCategoryPending || !categoryEditor.name.trim()}
+              preset="primary"
+              size="md"
+              loading={saveCategoryPending}
+            >
+              {t("templateManage.categorySave")}
+            </PageActionButton>
+          </div>
+        </form>
+      ) : null}
+      <AsyncContent
+        state={categoriesState}
+        refreshIntent="background"
+        loadingLabel={t("app.loading")}
+        skeleton={<SkeletonRows count={4} className="mt-4" />}
+        initialError={(
+          <AsyncErrorState
+            className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
+            title={t("templateFilter.categoriesLoadFailed")}
+            retryLabel={t("common.retry")}
+            retryingLabel={t("app.loading")}
+            retrying={categoriesState.fetch === "fetching"}
+            onRetry={onRetryCategories}
+          />
+        )}
+        paused={(
+          <AsyncPausedState
+            title={t("app.requestPaused.title")}
+            message={t("app.requestPaused.message")}
+            retryLabel={t("common.retry")}
+            onRetry={onRetryCategories}
+            className="mt-4 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-100"
+          />
+        )}
+        inactive={null}
+        empty={(
+          <div className="mt-4 rounded-xl border border-dashed pf-hairline-strong px-3 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t("templateManage.categoryEmpty")}
+          </div>
+        )}
+        refreshFeedback={
+          categoriesState.error === "refresh" ? (
+            <div className="mt-3 text-xs text-red-600 dark:text-red-300">
+              {t("templateFilter.categoriesLoadFailed")}
+            </div>
+          ) : null
+        }
+      >
+        <nav className="mt-4 space-y-1" aria-label={t("templateManage.categoryPanel")}>
+          <button
+            type="button"
+            onClick={() => onCategoryFilterChange("")}
+            aria-current={!categoryFilter ? "page" : undefined}
+            className={templateCategoryNavButtonClassName(!categoryFilter)}
+          >
+            <span className="min-w-0 whitespace-normal break-words leading-5">{t("templateFilter.allCategories")}</span>
+          </button>
+          {categories.map((category) => {
+            const selected = categoryFilter === category.id;
+            return (
+              <div key={category.id} className="group/template-category-row relative flex min-h-10 items-center py-1">
+                <button
+                  type="button"
+                  onClick={() => onCategoryFilterChange(category.id)}
+                  aria-current={selected ? "page" : undefined}
+                  className={templateCategoryNavButtonClassName(selected, "min-w-0 flex-1 pr-16")}
+                >
+                  <span className="block min-w-0">
+                    <span className="block min-w-0 whitespace-normal break-words leading-5">{category.name}</span>
+                    <span className="mt-0.5 block text-xs text-slate-400">{category.sort_order}</span>
+                  </span>
+                </button>
+                <div className={categoryActionsClassName}>
+                  <PageActionButton
+                    type="button"
+                    onClick={() => {
+                      onCategoryEditorChange(categoryDraft(category));
+                      onCategoryEditorOpenChange(true);
+                    }}
+                    preset="secondary"
+                    size="icon-sm"
+                    aria-label={t("common.rename")}
+                    title={t("common.rename")}
+                    leadingIcon={<Pencil size={13} />}
+                  />
+                  <PageActionButton
+                    type="button"
+                    onClick={() => onDeleteCategory(category)}
+                    preset="danger"
+                    size="icon-sm"
+                    aria-label={t("templateManage.categoryDelete")}
+                    title={t("templateManage.categoryDelete")}
+                    leadingIcon={<Trash2 size={13} />}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </nav>
+      </AsyncContent>
+    </section>
+  );
+}
+
 function TemplateManagementFeedbackDialog({
   successMessage,
   errorMessage,
@@ -346,11 +690,17 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const scope: CanvasTemplateScope = mode === "global" ? "global" : "user";
+  const mobileCategoryDrawerButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileCategoryDrawerRestoreFocusRef = useRef(true);
   const [search, setSearch] = useState("");
   const [entryFilter, setEntryFilter] = useState<EntryFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
   const [categoryEditor, setCategoryEditor] = useState<CategoryDraft>(() => categoryDraft());
+  const [mobileCategoryDrawerOpen, setMobileCategoryDrawerOpen] = useState(false);
+  const [useFloatingCategoryRail, setUseFloatingCategoryRail] = useState(
+    () => !shouldUseDesktopTemplateCategoryRail(),
+  );
   const [templateDrafts, setTemplateDrafts] = useState<Record<string, TemplateDraft>>({});
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [copyGlobalDraft, setCopyGlobalDraft] = useState<CopyGlobalDraft | null>(null);
@@ -604,6 +954,47 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
   const categoriesResolved = categoriesPhase === "ready" || categoriesPhase === "empty";
   const isWorkspaceSubpage = activeScheme === "workspace";
   const PageActionButton = templateActionButtonComponent(isWorkspaceSubpage);
+  const selectedCategory = categories.find((category) => category.id === categoryFilter) ?? null;
+  const floatingCategoryTriggerLabel = `${t("templateManage.categoryPanel")} · ${
+    selectedCategory ? selectedCategory.name : t("templateFilter.allCategories")
+  } · ${t("templateManage.categoryCount", { count: categories.length })}`;
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) {
+      return undefined;
+    }
+    const mediaQuery = window.matchMedia(TEMPLATE_MANAGE_MOBILE_CATEGORY_DRAWER_DESKTOP_QUERY);
+    const handleViewportChange = (event?: MediaQueryListEvent) => {
+      const useDesktopRail = event?.matches ?? mediaQuery.matches;
+      setUseFloatingCategoryRail(!useDesktopRail);
+      if (useDesktopRail) {
+        setMobileCategoryDrawerOpen(false);
+      }
+    };
+    handleViewportChange();
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleViewportChange);
+      return () => mediaQuery.removeEventListener("change", handleViewportChange);
+    }
+    mediaQuery.addListener(handleViewportChange);
+    return () => mediaQuery.removeListener(handleViewportChange);
+  }, []);
+
+  function focusMobileCategoryDrawerTrigger() {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      mobileCategoryDrawerButtonRef.current?.focus();
+    });
+  }
+
+  function handleSelectCategory(categoryId: string) {
+    setCategoryFilter(categoryId);
+    if (useFloatingCategoryRail) {
+      setMobileCategoryDrawerOpen(false);
+    }
+  }
 
   function retryTemplates() {
     if (mode === "global") {
@@ -613,13 +1004,48 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
     void personalTemplatesQuery.refetch();
   }
 
+  const categoryPanel = (
+    <TemplateCategoryPanel
+      categories={categories}
+      categoriesState={categoriesState}
+      categoriesResolved={categoriesResolved}
+      categoryFilter={categoryFilter}
+      categoryEditorOpen={categoryEditorOpen}
+      categoryEditor={categoryEditor}
+      saveCategoryPending={saveCategoryMutation.isPending}
+      isWorkspaceSubpage={isWorkspaceSubpage}
+      surfaceClassName={useFloatingCategoryRail ? "space-y-0" : undefined}
+      compactHeader={useFloatingCategoryRail}
+      onCategoryFilterChange={handleSelectCategory}
+      onCategoryEditorChange={setCategoryEditor}
+      onCategoryEditorOpenChange={setCategoryEditorOpen}
+      onSaveCategory={() => saveCategoryMutation.mutate()}
+      onDeleteCategory={(category) => setPendingDelete({ kind: "category", id: category.id, name: category.name })}
+      onRetryCategories={() => void categoriesQuery.refetch()}
+    />
+  );
+
+  const filterStrip = (
+    <TemplateFilterStrip
+      search={search}
+      entryFilter={entryFilter}
+      categoryFilter={categoryFilter}
+      categories={categories}
+      categoriesResolved={categoriesResolved}
+      isWorkspaceSubpage={isWorkspaceSubpage}
+      onSearchChange={setSearch}
+      onEntryFilterChange={setEntryFilter}
+      onCategoryFilterChange={setCategoryFilter}
+    />
+  );
+
   return (
     <div className={`${isWorkspaceSubpage ? "pf-workspace pf-settings-workspace" : "pf-app"} min-h-[100dvh] text-slate-900 dark:text-slate-100`}>
       <TopNav breadcrumbs={pageTitle} />
-      <main className={isWorkspaceSubpage ? "pf-workspace-subpage flex-1" : "mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8"}>
+      <main className={isWorkspaceSubpage ? "pf-workspace-subpage flex-1" : "pf-page pf-page-wide"}>
         <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame-shell w-full" : "contents"}>
           <div className={isWorkspaceSubpage ? "pf-workspace-subpage-frame" : "contents"}>
-        <header className={isWorkspaceSubpage ? "pf-workspace-subpage-header flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between" : "mb-6 flex flex-col gap-4 border-b border-slate-200 pb-5 dark:border-slate-800 lg:flex-row lg:items-end lg:justify-between"}>
+        <header className={isWorkspaceSubpage ? "pf-workspace-subpage-header flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between" : "pf-page-header border-b border-slate-200 pb-5 dark:border-slate-800"}>
           <div>
             <div className="pf-eyebrow mb-2">
               <Layers3 size={13} className="mr-1.5" />
@@ -638,237 +1064,56 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
           </PageActionButton>
         </header>
 
-        <div className={isWorkspaceSubpage ? "pf-side-shell min-h-full" : "grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]"}>
-          <aside className={isWorkspaceSubpage ? "pf-side-rail space-y-5 px-4 py-5 sm:px-5" : "space-y-5"}>
-            <section className={TEMPLATE_PANEL_CLASS}>
-              <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateFilter.search")}</h2>
-              <div className="mt-4 space-y-3">
-                <label className="block">
-                  <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
-                    {t("templateFilter.search")}
-                  </span>
-                  <span className="relative block">
-                    <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    {isWorkspaceSubpage ? (
-                      <WorkspaceTextInput
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                        className="pl-9"
-                        placeholder={t("templateFilter.searchPlaceholder")}
-                      />
-                    ) : (
-                      <ClassicTextInput
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                        className="pl-9"
-                        placeholder={t("templateFilter.searchPlaceholder")}
-                      />
-                    )}
-                  </span>
-                </label>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block min-w-0">
-                    <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
-                      {t("templateManage.entry")}
-                    </span>
-                    {isWorkspaceSubpage ? (
-                      <WorkspaceSelectField
-                        value={entryFilter}
-                        options={ENTRY_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
-                        onChange={(value) => setEntryFilter(value as EntryFilter)}
-                        size="default"
-                      />
-                    ) : (
-                      <ClassicSelectField
-                        value={entryFilter}
-                        options={ENTRY_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
-                        onChange={(value) => setEntryFilter(value as EntryFilter)}
-                        radius="lg"
-                      />
-                    )}
-                  </label>
-                  <label className="block min-w-0">
-                    <span className="mb-1.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">
-                      {t("templateFilter.category")}
-                    </span>
-                    {isWorkspaceSubpage ? (
-                      <WorkspaceSelectField
-                        value={categoryFilter}
-                        options={[
-                          { value: "", label: t("templateFilter.allCategories") },
-                          ...categories.map((category) => ({ value: category.id, label: category.name })),
-                        ]}
-                        onChange={setCategoryFilter}
-                        size="default"
-                        disabled={!categoriesResolved}
-                      />
-                    ) : (
-                      <ClassicSelectField
-                        value={categoryFilter}
-                        options={[
-                          { value: "", label: t("templateFilter.allCategories") },
-                          ...categories.map((category) => ({ value: category.id, label: category.name })),
-                        ]}
-                        onChange={setCategoryFilter}
-                        radius="lg"
-                        disabled={!categoriesResolved}
-                      />
-                    )}
-                  </label>
-                </div>
-              </div>
-            </section>
-
-            <section className={TEMPLATE_PANEL_CLASS}>
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateManage.categoryPanel")}</h2>
-                <PageActionButton
-                  onClick={() => {
-                    setCategoryEditor(categoryDraft());
-                    setCategoryEditorOpen(true);
-                  }}
-                  preset="primary"
-                  size="md"
-                  disabled={!categoriesResolved}
-                  leadingIcon={<Plus size={13} />}
-                >
-                  {t("templateManage.categoryCreate")}
-                </PageActionButton>
-              </div>
-              {categoryEditorOpen ? (
-                <form
-                  className={`${TEMPLATE_FIELD_CARD_CLASS} mt-4 grid gap-3 p-3`}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    saveCategoryMutation.mutate();
-                  }}
-                >
-                  {isWorkspaceSubpage ? (
-                    <>
-                      <WorkspaceTextInput
-                        value={categoryEditor.name}
-                        onChange={(event) => setCategoryEditor((current) => ({ ...current, name: event.target.value }))}
-                        size="default"
-                        placeholder={t("templateManage.categoryName")}
-                        maxLength={120}
-                      />
-                      <WorkspaceTextInput
-                        type="number"
-                        value={categoryEditor.sort_order}
-                        onChange={(event) => setCategoryEditor((current) => ({ ...current, sort_order: event.target.value }))}
-                        size="default"
-                        placeholder={t("templateManage.categorySort")}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <ClassicTextInput
-                        value={categoryEditor.name}
-                        onChange={(event) => setCategoryEditor((current) => ({ ...current, name: event.target.value }))}
-                        placeholder={t("templateManage.categoryName")}
-                        maxLength={120}
-                      />
-                      <ClassicTextInput
-                        type="number"
-                        value={categoryEditor.sort_order}
-                        onChange={(event) => setCategoryEditor((current) => ({ ...current, sort_order: event.target.value }))}
-                        placeholder={t("templateManage.categorySort")}
-                      />
-                    </>
-                  )}
-                  <div className="flex justify-end gap-2">
-                    <PageActionButton onClick={() => setCategoryEditorOpen(false)} preset="secondary" size="sm">
-                      {t("common.cancel")}
-                    </PageActionButton>
-                    <PageActionButton
-                      type="submit"
-                      disabled={saveCategoryMutation.isPending || !categoryEditor.name.trim()}
-                      preset="primary"
-                      size="md"
-                      loading={saveCategoryMutation.isPending}
-                    >
-                      {t("templateManage.categorySave")}
-                    </PageActionButton>
-                  </div>
-                </form>
+        {useFloatingCategoryRail ? (
+          <button
+            ref={mobileCategoryDrawerButtonRef}
+            type="button"
+            onClick={() => setMobileCategoryDrawerOpen(true)}
+            className="pf-resource-library-mobile-groups-trigger"
+            aria-label={floatingCategoryTriggerLabel}
+            title={floatingCategoryTriggerLabel}
+          >
+            <span className="pf-resource-library-mobile-groups-mark" aria-hidden="true">
+              <Layers3 size={18} />
+              {categories.length ? (
+                <span className="pf-resource-library-mobile-groups-count">{Math.min(categories.length, 99)}</span>
               ) : null}
-              <AsyncContent
-                state={categoriesState}
-                refreshIntent="background"
-                loadingLabel={t("app.loading")}
-                skeleton={<SkeletonRows count={4} className="mt-4" />}
-                initialError={(
-                  <AsyncErrorState
-                    className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-400/35 dark:bg-red-500/10 dark:text-red-100"
-                    title={t("templateFilter.categoriesLoadFailed")}
-                    retryLabel={t("common.retry")}
-                    retryingLabel={t("app.loading")}
-                    retrying={categoriesState.fetch === "fetching"}
-                    onRetry={() => void categoriesQuery.refetch()}
-                  />
-                )}
-                paused={(
-                  <AsyncPausedState
-                    title={t("app.requestPaused.title")}
-                    message={t("app.requestPaused.message")}
-                    retryLabel={t("common.retry")}
-                    onRetry={() => void categoriesQuery.refetch()}
-                    className="mt-4 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-100"
-                  />
-                )}
-                inactive={null}
-                empty={(
-                  <div className="mt-4 rounded-xl border border-dashed pf-hairline-strong px-3 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                    {t("templateManage.categoryEmpty")}
-                  </div>
-                )}
-                refreshFeedback={
-                  categoriesState.error === "refresh" ? (
-                    <div className="mt-3 text-xs text-red-600 dark:text-red-300">
-                      {t("templateFilter.categoriesLoadFailed")}
-                    </div>
-                  ) : null
-                }
-              >
-                <div className="mt-4 space-y-2">
-                  {categories.map((category) => (
-                    <div
-                      key={category.id}
-                      className={`${TEMPLATE_FIELD_CARD_CLASS} flex items-center gap-2 px-3 py-2`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{category.name}</div>
-                        <div className="mt-0.5 text-xs text-slate-400">{category.sort_order}</div>
-                      </div>
-                      <PageActionButton
-                        type="button"
-                        onClick={() => {
-                          setCategoryEditor(categoryDraft(category));
-                          setCategoryEditorOpen(true);
-                        }}
-                        preset="secondary"
-                        size="icon-sm"
-                        aria-label={t("templateManage.categorySave")}
-                        title={t("templateManage.categorySave")}
-                        leadingIcon={<Pencil size={13} />}
-                      />
-                      <PageActionButton
-                        type="button"
-                        onClick={() => setPendingDelete({ kind: "category", id: category.id, name: category.name })}
-                        preset="danger"
-                        size="icon-sm"
-                        aria-label={t("templateManage.categoryDelete")}
-                        title={t("templateManage.categoryDelete")}
-                        leadingIcon={<Trash2 size={13} />}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </AsyncContent>
-            </section>
-          </aside>
+            </span>
+            <span className="text-center text-[11px] font-semibold leading-4">{t("templateManage.categoryPanel")}</span>
+          </button>
+        ) : null}
 
-          <section className={isWorkspaceSubpage ? "pf-side-content min-w-0 px-4 py-5 sm:px-6 lg:px-8" : "min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25"}>
+        <div
+          className={
+            useFloatingCategoryRail
+              ? isWorkspaceSubpage
+                ? "pf-side-shell min-h-full"
+                : "space-y-5"
+              : isWorkspaceSubpage
+                ? "pf-side-shell min-h-full"
+                : "grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]"
+          }
+        >
+          {!useFloatingCategoryRail ? (
+            <aside className={isWorkspaceSubpage ? "pf-side-rail space-y-5 px-4 py-5 sm:px-5" : "space-y-5 lg:sticky lg:top-4 lg:self-start"}>
+              {filterStrip}
+              {categoryPanel}
+            </aside>
+          ) : null}
+
+          <section
+            className={
+              useFloatingCategoryRail
+                ? isWorkspaceSubpage
+                  ? "pf-side-content min-w-0 space-y-5 px-4 py-5 sm:px-6 lg:px-8"
+                  : "min-w-0 space-y-5"
+                : isWorkspaceSubpage
+                  ? "pf-side-content min-w-0 px-4 py-5 sm:px-6 lg:px-8"
+                  : "min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25"
+            }
+          >
+            {useFloatingCategoryRail ? filterStrip : null}
+            <div className={useFloatingCategoryRail ? (isWorkspaceSubpage ? "min-w-0" : "min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-[#0f1726] dark:shadow-black/25") : "contents"}>
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-950 dark:text-white">{t("templateManage.templatePanel")}</h2>
@@ -882,7 +1127,29 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
               state={templatesState}
               refreshIntent="parameter-change"
               loadingLabel={t("app.loading")}
-              skeleton={<SkeletonCards count={6} className="lg:grid-cols-2 xl:grid-cols-2" />}
+              skeleton={
+                isWorkspaceSubpage ? (
+                  <SkeletonCards count={6} className="lg:grid-cols-2 xl:grid-cols-2" />
+                ) : (
+                  <div
+                    aria-hidden="true"
+                    className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+                  >
+                    {Array.from({ length: 6 }, (_, index) => (
+                      <article
+                        key={index}
+                        className="overflow-hidden rounded-xl border pf-hairline pf-surface"
+                      >
+                        <Skeleton className="aspect-[4/3] w-full rounded-none" />
+                        <div className="space-y-3 p-4">
+                          <Skeleton className="h-4 w-3/5" />
+                          <SkeletonText lines={2} />
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )
+              }
               initialError={(
                 <AsyncErrorState
                   title={t("templateManage.loadFailed")}
@@ -923,7 +1190,13 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                 ) : null
               }
             >
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div
+                className={
+                  isWorkspaceSubpage
+                    ? "grid gap-4 lg:grid-cols-2"
+                    : "grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+                }
+              >
                 {templates.map((template) => {
                   const draft = templateDrafts[template.key] ?? templateDraft(template);
                   const templateId = template.user_template_id ?? template.template_id ?? template.key;
@@ -1282,11 +1555,82 @@ export function TemplateManagementPage({ mode }: TemplateManagementPageProps) {
                 })}
               </div>
             </AsyncContent>
+            </div>
           </section>
         </div>
           </div>
         </div>
       </main>
+
+      {useFloatingCategoryRail ? (
+        <Drawer.Root
+          direction="left"
+          open={mobileCategoryDrawerOpen}
+          onOpenChange={(open) => {
+            setMobileCategoryDrawerOpen(open);
+            if (!open) {
+              const shouldRestoreFocus = mobileCategoryDrawerRestoreFocusRef.current;
+              mobileCategoryDrawerRestoreFocusRef.current = true;
+              if (shouldRestoreFocus) {
+                focusMobileCategoryDrawerTrigger();
+              }
+            }
+          }}
+        >
+          <Drawer.Portal>
+            <Drawer.Overlay
+              className="fixed inset-0 z-[70] bg-slate-950/45 backdrop-blur-[2px]"
+              onWheel={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onTouchMove={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+            />
+            <Drawer.Content
+              onClick={(event) => event.stopPropagation()}
+              onWheel={(event) => event.stopPropagation()}
+              onTouchMove={(event) => event.stopPropagation()}
+              className="pf-resource-library-mobile-groups-drawer fixed inset-y-0 left-0 z-[71] flex w-[min(84vw,320px)] flex-col border-r outline-none"
+            >
+              <Drawer.Title className="sr-only">{t("templateManage.categoryPanel")}</Drawer.Title>
+              <div className="pf-resource-library-mobile-groups-drawer-header px-4 py-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="pf-resource-library-mobile-groups-mark shrink-0" aria-hidden="true">
+                      <Layers3 size={18} />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-950 dark:text-white">
+                        {t("templateManage.categoryPanel")}
+                      </div>
+                      <div className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                        {(selectedCategory ? selectedCategory.name : t("templateFilter.allCategories")) +
+                          " · " +
+                          t("templateManage.categoryCount", { count: categories.length })}
+                      </div>
+                    </div>
+                  </div>
+                  <PageActionButton
+                    type="button"
+                    aria-label={t("common.close")}
+                    title={t("common.close")}
+                    onClick={() => setMobileCategoryDrawerOpen(false)}
+                    preset="secondary"
+                    size="icon-lg"
+                    leadingIcon={<X size={18} />}
+                  />
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+                {categoryPanel}
+              </div>
+            </Drawer.Content>
+          </Drawer.Portal>
+        </Drawer.Root>
+      ) : null}
 
       <TemplateManagementFeedbackDialog
         successMessage={savedMessage}
