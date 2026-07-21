@@ -182,8 +182,10 @@ Current classic page surfaces include:
 - Workspace background motion is centralized in `UiLayoutSchemeProvider` and `web/src/lib/workspaceMotion.ts`; page-local
   pointer listeners are not allowed for workspace ambient effects.
 - Ambient cursor glow performance contract (do not regress):
-  - Mount a dedicated `.pf-workspace-ambient-glow` node under `#root` (fine pointer only). Update
-    `element.style.transform` with `translate3d(...)` from quantized pointer coords (`workspaceMotion.ts`).
+  - Mount a dedicated `.pf-workspace-ambient-glow` as the first child of `.pf-workspace` / `.pf-app` (fine pointer
+    only), with `z-index: -1` inside the shell's `isolation`. Do **not** mount under `#root` alone — opaque shell
+    backgrounds hide it. Update `element.style.transform` with `translate3d(...)` from quantized pointer coords
+    (`workspaceMotion.ts`). Lazy shells may appear after the provider effect; remount/retry when the host is missing.
   - Do **not** write `--pf-cursor-x/y` on `documentElement` for motion: root custom properties invalidate inherited
     style broadly and jank hover on the top shell.
   - Do **not** bind `--pf-cursor-*` into `.pf-app` / `.pf-workspace` full-page `background` gradients.

@@ -625,7 +625,7 @@ textarea {
   isolation: isolate;
   min-height: 100dvh;
   overflow-x: clip;
-  /* Static shell only — cursor glow lives on ::before so pointermove does not repaint the whole app. */
+  /* Static shell only — cursor glow is a dedicated fixed node under this isolation. */
   background:
     linear-gradient(120deg, color-mix(in srgb, var(--pf-accent) 9%, transparent), transparent 38%),
     linear-gradient(245deg, color-mix(in srgb, var(--pf-accent-2) 10%, transparent), transparent 34%),
@@ -644,8 +644,10 @@ textarea {
 }
 
 /*
- * Fine-pointer ambient glow node (mounted by UiLayoutSchemeProvider).
- * Gradients are static; only element.style.transform is updated (compositor path).
+ * Fine-pointer ambient glow node (mounted by UiLayoutSchemeProvider as first child of
+ * .pf-workspace / .pf-app). Gradients are static; only element.style.transform updates
+ * (compositor path). z-index:-1 stays above the shell background inside isolation and
+ * below page content — never mount under #root (opaque shell would hide it).
  * Root --pf-cursor-* vars are intentionally unused for motion.
  */
 .pf-workspace-ambient-glow {
@@ -656,7 +658,7 @@ textarea {
   height: 1100px;
   margin-left: -420px;
   margin-top: -420px;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
   contain: layout style paint;
   background:
@@ -672,16 +674,6 @@ textarea {
     );
   transform: translate3d(52vw, 18vh, 0);
   will-change: transform;
-}
-
-:root[data-ui-layout-scheme="workspace"] #root {
-  position: relative;
-  isolation: isolate;
-}
-
-:root[data-ui-layout-scheme="workspace"] #root > :not(.pf-workspace-ambient-glow) {
-  position: relative;
-  z-index: 1;
 }
 
 :root[data-workspace-appearance="dusk"] .pf-workspace-ambient-glow {

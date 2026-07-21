@@ -142,20 +142,32 @@ function removeWorkspaceAmbientGlow(node: HTMLElement | null) {
   node?.remove();
 }
 
-function workspaceAmbientHost(): HTMLElement {
-  return document.getElementById("root") ?? document.body;
+/**
+ * Glow must live inside the opaque workspace shell so z-index:-1 sits above the shell
+ * background but below page content. Mounting under #root paints under .pf-workspace and is invisible.
+ */
+function workspaceAmbientHost(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".pf-workspace, .pf-app");
 }
 
-function ensureWorkspaceAmbientGlow(): HTMLElement {
+function ensureWorkspaceAmbientGlow(): HTMLElement | null {
   const host = workspaceAmbientHost();
+  if (!host) {
+    return null;
+  }
   const existing = host.querySelector<HTMLElement>(`.${WORKSPACE_AMBIENT_GLOW_CLASS}`);
   if (existing) {
     return existing;
   }
+  // Drop any stale glow left under #root / body from earlier hosts.
+  document.querySelectorAll<HTMLElement>(`.${WORKSPACE_AMBIENT_GLOW_CLASS}`).forEach((node) => {
+    if (node.parentElement !== host) {
+      node.remove();
+    }
+  });
   const glow = document.createElement("div");
   glow.className = WORKSPACE_AMBIENT_GLOW_CLASS;
   glow.setAttribute("aria-hidden", "true");
-  // Inside #root so it paints above the opaque root background and under app content.
   host.insertBefore(glow, host.firstChild);
   return glow;
 }
@@ -229,7 +241,7 @@ export function UiLayoutSchemeProvider({
     clearWorkspacePointerVars(root);
 
     if (activeScheme !== "workspace") {
-      removeWorkspaceAmbientGlow(workspaceAmbientHost().querySelector<HTMLElement>(`.${WORKSPACE_AMBIENT_GLOW_CLASS}`));
+      document.querySelectorAll<HTMLElement>(`.${WORKSPACE_AMBIENT_GLOW_CLASS}`).forEach((node) => node.remove());
       return;
     }
 
@@ -242,13 +254,27 @@ export function UiLayoutSchemeProvider({
 
     const disposeGlow = () => {
       removeWorkspaceAmbientGlow(glow);
+      document.querySelectorAll<HTMLElement>(`.${WORKSPACE_AMBIENT_GLOW_CLASS}`).forEach((node) => node.remove());
       glow = null;
       lastAppliedTransform = "";
     };
 
+    const resolveGlow = () => {
+      if (glow?.isConnected) {
+        return glow;
+      }
+      glow = ensureWorkspaceAmbientGlow();
+      lastAppliedTransform = "";
+      return glow;
+    };
+
     const applyAmbientTransform = () => {
       frameId = 0;
-      if (!lastPointer || !glow) {
+      if (!lastPointer) {
+        return;
+      }
+      const target = resolveGlow();
+      if (!target) {
         return;
       }
       const values = workspacePointerCssValues(lastPointer.clientX, lastPointer.clientY, workspacePointerViewport());
@@ -258,7 +284,7 @@ export function UiLayoutSchemeProvider({
         return;
       }
       lastAppliedTransform = nextTransform;
-      glow.style.transform = nextTransform;
+      target.style.transform = nextTransform;
     };
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -271,6 +297,8 @@ export function UiLayoutSchemeProvider({
       }
     };
 
+    let hostRetryId = 0;
+
     const stopListening = () => {
       if (listening) {
         document.removeEventListener("pointermove", handlePointerMove);
@@ -280,6 +308,10 @@ export function UiLayoutSchemeProvider({
       if (frameId !== 0) {
         window.cancelAnimationFrame(frameId);
         frameId = 0;
+      }
+      if (hostRetryId !== 0) {
+        window.cancelAnimationFrame(hostRetryId);
+        hostRetryId = 0;
       }
       disposeGlow();
       clearWorkspacePointerVars(root);
@@ -292,6 +324,21 @@ export function UiLayoutSchemeProvider({
       glow = ensureWorkspaceAmbientGlow();
       document.addEventListener("pointermove", handlePointerMove, { passive: true });
       listening = true;
+      // Lazy routes may mount .pf-workspace after this effect; retry until shell exists.
+      if (!glow && hostRetryId === 0) {
+        let attempts = 0;
+        const retryHost = () => {
+          hostRetryId = 0;
+          if (!listening || glow?.isConnected) {
+            return;
+          }
+          glow = ensureWorkspaceAmbientGlow();
+          if (!glow && attempts++ < 90) {
+            hostRetryId = window.requestAnimationFrame(retryHost);
+          }
+        };
+        hostRetryId = window.requestAnimationFrame(retryHost);
+      }
     };
 
     const syncPointerMode = () => {
@@ -307,6 +354,10 @@ export function UiLayoutSchemeProvider({
 
     return () => {
       finePointer?.removeEventListener("change", syncPointerMode);
+      if (hostRetryId !== 0) {
+        window.cancelAnimationFrame(hostRetryId);
+        hostRetryId = 0;
+      }
       stopListening();
     };
   }, [activeScheme]);

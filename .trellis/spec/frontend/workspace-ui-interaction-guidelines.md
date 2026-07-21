@@ -47,7 +47,7 @@ Rules:
 - Use semantic workspace classes before broad glass-panel selectors. Broad panel/card selectors must exclude `input`, `textarea`, `select`, `button`, and semantic action classes.
 - Any shared setting control must be visually checked in `mist`, `sage`, and `dusk`.
 - Keep the workspace ambient pointer effect centralized in `UiLayoutSchemeProvider` and `web/src/lib/workspaceMotion.ts`. Page-local pointer listeners are not allowed for workspace background effects.
-- Ambient implementation must stay compositor-cheap: dedicated `.pf-workspace-ambient-glow` under `#root`, direct `transform` updates, quantized coordinates; never drive glow via root CSS variables or full-page `background` on `.pf-app`/`.pf-workspace`.
+- Ambient implementation must stay compositor-cheap: dedicated `.pf-workspace-ambient-glow` as first child of `.pf-workspace`/`.pf-app` (`z-index: -1` inside shell isolation), direct `transform` updates, quantized coordinates; never drive glow via root CSS variables or full-page `background` on the shell.
 - Workspace top concept nav / handle / home quick-nav must not rely on `backdrop-filter` over the ambient glow; opaque (or high-opacity) fills keep hover paint cost low.
 
 ## Settings Page Shell and Modules
