@@ -47,6 +47,8 @@ Rules:
 - Use semantic workspace classes before broad glass-panel selectors. Broad panel/card selectors must exclude `input`, `textarea`, `select`, `button`, and semantic action classes.
 - Any shared setting control must be visually checked in `mist`, `sage`, and `dusk`.
 - Keep the workspace ambient pointer effect centralized in `UiLayoutSchemeProvider` and `web/src/lib/workspaceMotion.ts`. Page-local pointer listeners are not allowed for workspace background effects.
+- Ambient implementation must stay compositor-cheap: dedicated `.pf-workspace-ambient-glow` under `#root`, direct `transform` updates, quantized coordinates; never drive glow via root CSS variables or full-page `background` on `.pf-app`/`.pf-workspace`.
+- Workspace top concept nav / handle / home quick-nav must not rely on `backdrop-filter` over the ambient glow; opaque (or high-opacity) fills keep hover paint cost low.
 
 ## Settings Page Shell and Modules
 
@@ -528,6 +530,7 @@ Pointer behavior should reinforce affordance without turning operational UI into
 - Hover should increase local contrast, not add broad glow.
 - Focus-visible must be clear for keyboard users.
 - Workspace ambient cursor effects are centralized; do not attach page-local mouse listeners for the background.
+- Prefer transform-only ambient layers over `backdrop-filter` glass on chrome that tracks the pointer (concept-nav, quick-nav).
 - Hover-only image previews must be gated to fine pointer mouse input. Touch devices should not show hover previews.
 - Child action buttons inside clickable rows must call `stopPropagation()` on click/pointer events.
 

@@ -181,6 +181,15 @@ Current classic page surfaces include:
   `web/src/index.css`, not hard-coded slate/indigo/violet surfaces.
 - Workspace background motion is centralized in `UiLayoutSchemeProvider` and `web/src/lib/workspaceMotion.ts`; page-local
   pointer listeners are not allowed for workspace ambient effects.
+- Ambient cursor glow performance contract (do not regress):
+  - Mount a dedicated `.pf-workspace-ambient-glow` node under `#root` (fine pointer only). Update
+    `element.style.transform` with `translate3d(...)` from quantized pointer coords (`workspaceMotion.ts`).
+  - Do **not** write `--pf-cursor-x/y` on `documentElement` for motion: root custom properties invalidate inherited
+    style broadly and jank hover on the top shell.
+  - Do **not** bind `--pf-cursor-*` into `.pf-app` / `.pf-workspace` full-page `background` gradients.
+  - Top shell chrome that sits over the glow (`.pf-shell-concept-nav`, workspace handle, home quick-nav) must not use
+    `backdrop-filter` while ambient motion is active; prefer more opaque panel fills. `backdrop-filter` re-samples the
+    moving glow every frame and recreates hover jank even after layering the glow.
 - `login`, initial loading, and unauthenticated redirects remain outside the authenticated workspace shell unless a product
   requirement explicitly designs scheme-specific public pages.
 - Do not assume `App.tsx` `LayoutSchemeRoute` is the only workspace dispatch mechanism. Some routes branch internally with

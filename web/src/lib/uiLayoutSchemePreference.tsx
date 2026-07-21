@@ -16,8 +16,10 @@ import {
   uiLayoutSchemePreferenceUpdate,
 } from "./uiLayoutScheme";
 import {
+  WORKSPACE_AMBIENT_GLOW_CLASS,
   WORKSPACE_CURSOR_X_PROPERTY,
   WORKSPACE_CURSOR_Y_PROPERTY,
+  workspaceAmbientGlowTransform,
   workspacePointerCssValues,
 } from "./workspaceMotion";
 import { workspaceAppearanceResolvedTheme } from "./workspaceAppearance";
@@ -136,6 +138,28 @@ function clearWorkspacePointerVars(root: HTMLElement) {
   root.style.removeProperty(WORKSPACE_CURSOR_Y_PROPERTY);
 }
 
+function removeWorkspaceAmbientGlow(node: HTMLElement | null) {
+  node?.remove();
+}
+
+function workspaceAmbientHost(): HTMLElement {
+  return document.getElementById("root") ?? document.body;
+}
+
+function ensureWorkspaceAmbientGlow(): HTMLElement {
+  const host = workspaceAmbientHost();
+  const existing = host.querySelector<HTMLElement>(`.${WORKSPACE_AMBIENT_GLOW_CLASS}`);
+  if (existing) {
+    return existing;
+  }
+  const glow = document.createElement("div");
+  glow.className = WORKSPACE_AMBIENT_GLOW_CLASS;
+  glow.setAttribute("aria-hidden", "true");
+  // Inside #root so it paints above the opaque root background and under app content.
+  host.insertBefore(glow, host.firstChild);
+  return glow;
+}
+
 export function UiLayoutSchemeProvider({
   children,
   enabled = true,
@@ -201,24 +225,40 @@ export function UiLayoutSchemeProvider({
     }
 
     const root = document.documentElement;
+    // Legacy root CSS vars must not drive ambient motion — they invalidate inherited style broadly.
+    clearWorkspacePointerVars(root);
+
     if (activeScheme !== "workspace") {
-      clearWorkspacePointerVars(root);
+      removeWorkspaceAmbientGlow(workspaceAmbientHost().querySelector<HTMLElement>(`.${WORKSPACE_AMBIENT_GLOW_CLASS}`));
       return;
     }
 
     const finePointer = window.matchMedia?.("(hover: hover) and (pointer: fine)");
     let frameId = 0;
     let lastPointer: PointerEvent | null = null;
+    let lastAppliedTransform = "";
     let listening = false;
+    let glow: HTMLElement | null = null;
 
-    const applyPointerVars = () => {
+    const disposeGlow = () => {
+      removeWorkspaceAmbientGlow(glow);
+      glow = null;
+      lastAppliedTransform = "";
+    };
+
+    const applyAmbientTransform = () => {
       frameId = 0;
-      if (!lastPointer) {
+      if (!lastPointer || !glow) {
         return;
       }
       const values = workspacePointerCssValues(lastPointer.clientX, lastPointer.clientY, workspacePointerViewport());
-      root.style.setProperty(WORKSPACE_CURSOR_X_PROPERTY, values.x);
-      root.style.setProperty(WORKSPACE_CURSOR_Y_PROPERTY, values.y);
+      const nextTransform = workspaceAmbientGlowTransform(values);
+      // Direct element transform only — avoid root custom properties.
+      if (nextTransform === lastAppliedTransform) {
+        return;
+      }
+      lastAppliedTransform = nextTransform;
+      glow.style.transform = nextTransform;
     };
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -227,22 +267,21 @@ export function UiLayoutSchemeProvider({
       }
       lastPointer = event;
       if (frameId === 0) {
-        frameId = window.requestAnimationFrame(applyPointerVars);
+        frameId = window.requestAnimationFrame(applyAmbientTransform);
       }
     };
 
     const stopListening = () => {
-      if (!listening) {
-        clearWorkspacePointerVars(root);
-        return;
+      if (listening) {
+        document.removeEventListener("pointermove", handlePointerMove);
+        listening = false;
       }
-      document.removeEventListener("pointermove", handlePointerMove);
-      listening = false;
       lastPointer = null;
       if (frameId !== 0) {
         window.cancelAnimationFrame(frameId);
         frameId = 0;
       }
+      disposeGlow();
       clearWorkspacePointerVars(root);
     };
 
@@ -250,6 +289,7 @@ export function UiLayoutSchemeProvider({
       if (listening) {
         return;
       }
+      glow = ensureWorkspaceAmbientGlow();
       document.addEventListener("pointermove", handlePointerMove, { passive: true });
       listening = true;
     };
