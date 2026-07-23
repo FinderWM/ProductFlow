@@ -41,6 +41,7 @@ import { Link, useLocation } from "react-router-dom";
 import { FloatingSurface } from "./FloatingSurface";
 import { actionButtonComponentForAppearance, type LayoutActionAppearance } from "./layoutActionButtons";
 import { useCurrentWeather, weatherGeocodingLanguage } from "../lib/currentWeather";
+import { pulseWeatherLogoMotion } from "../lib/workspaceMotion";
 import { LOCALES, type Locale, type TranslationKey } from "../lib/i18n";
 import { usePreferences } from "../lib/preferences";
 import {
@@ -1265,9 +1266,15 @@ function WeatherControl({ appearance }: { appearance: LayoutActionAppearance }) 
   return (
     <div
       className="group relative shrink-0"
-      onPointerEnter={showInfo}
+      onPointerEnter={() => {
+        pulseWeatherLogoMotion();
+        showInfo();
+      }}
       onPointerLeave={scheduleInfoClose}
-      onFocus={showInfo}
+      onFocus={() => {
+        pulseWeatherLogoMotion();
+        showInfo();
+      }}
       onBlur={(event) => {
         const relatedTarget = event.relatedTarget;
         if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) {

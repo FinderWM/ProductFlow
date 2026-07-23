@@ -673,13 +673,17 @@ textarea {
       transparent 62%
     );
   transform: translate3d(52vw, 18vh, 0);
-  will-change: transform;
+  will-change: auto;
 }
 
 :root[data-workspace-appearance="dusk"] .pf-workspace-ambient-glow {
   background:
     radial-gradient(420px circle at 420px 420px, rgb(146 170 122 / 0.13), transparent 58%),
     radial-gradient(720px circle at 720px 560px, rgb(198 155 102 / 0.08), transparent 62%);
+}
+
+:root[data-workspace-document-motion="paused"] .pf-workspace-ambient-glow {
+  will-change: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -728,9 +732,14 @@ textarea {
         color-mix(in srgb, var(--pf-accent-2) 8%, transparent),
         transparent 66%
       );
-    animation: pf-workspace-ambient-field 14s var(--pf-motion-standard) infinite alternate;
+  animation: pf-workspace-ambient-field 14s var(--pf-motion-standard) infinite alternate;
     will-change: transform, opacity;
   }
+}
+
+:root[data-workspace-document-motion="paused"][data-ui-layout-scheme="workspace"] :is(.pf-workspace, .pf-app)::after {
+  animation-play-state: paused;
+  will-change: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2797,6 +2806,8 @@ textarea {
 .pf-workspace-home-section {
   margin-top: clamp(58px, 8vw, 104px);
   scroll-margin-top: 112px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 720px;
 }
 
 .pf-workspace-home-section-head {
@@ -4615,13 +4626,20 @@ textarea {
   top: 15px;
   background: rgb(255 255 255 / 0.84);
   box-shadow: -5px 1px 0 rgb(255 255 255 / 0.56), 6px 2px 0 rgb(255 255 255 / 0.42);
-  animation: pf-weather-logo-drift 4.8s var(--pf-motion-standard) infinite alternate;
 }
 
 .pf-workspace-weather-logo::after {
   inset: 4px;
   border: 1px solid rgb(255 255 255 / 0.26);
-  animation: pf-weather-logo-breathe 3.2s var(--pf-motion-standard) infinite;
+}
+
+/* Only animate on weather refresh / hover pulse (see pulseWeatherLogoMotion). */
+:root[data-weather-motion="pulse"] .pf-workspace-weather-logo::before {
+  animation: pf-weather-logo-drift 4.8s var(--pf-motion-standard) 1 alternate;
+}
+
+:root[data-weather-motion="pulse"] .pf-workspace-weather-logo::after {
+  animation: pf-weather-logo-breathe 3.2s var(--pf-motion-standard) 1;
 }
 
 @keyframes pf-weather-logo-drift {
@@ -4881,7 +4899,8 @@ textarea {
   opacity: 0.58;
   transform: translate3d(-2%, -1%, 0) scale(1.02);
   animation: pf-workspace-art-field 18s var(--pf-motion-standard) infinite alternate;
-  will-change: transform, opacity;
+  animation-play-state: paused;
+  will-change: auto;
 }
 
 .pf-workspace-menu-summary-art::after {
@@ -4900,7 +4919,8 @@ textarea {
   opacity: 0.42;
   transform: translate3d(0, 0, 0) skewX(-12deg);
   animation: pf-workspace-art-scan 8s var(--pf-motion-soft) infinite;
-  will-change: transform, opacity;
+  animation-play-state: paused;
+  will-change: auto;
 }
 
 .pf-workspace-menu-summary-art-motion {
@@ -4924,7 +4944,8 @@ textarea {
   opacity: 0.66;
   transform: translate3d(0, 0, 0) rotate(-24deg);
   animation: pf-workspace-art-ribbon 12s var(--pf-motion-standard) infinite alternate;
-  will-change: transform, opacity;
+  animation-play-state: paused;
+  will-change: auto;
 }
 
 .pf-workspace-menu-summary-art-ribbon--one {
@@ -4956,6 +4977,33 @@ textarea {
     rgb(18 21 18 / 0.08);
 }
 
+.pf-workspace-menu-summary-art--image::before,
+.pf-workspace-menu-summary-art--image::after {
+  content: none;
+  animation: none;
+  will-change: auto;
+}
+
+.pf-workspace-menu-summary-art[data-workspace-motion-inview]::before,
+.pf-workspace-menu-summary-art[data-workspace-motion-inview]::after,
+.pf-workspace-menu-summary-art[data-workspace-motion-inview] .pf-workspace-menu-summary-art-ribbon,
+.pf-workspace-menu-summary-art[data-workspace-motion-inview] .pf-workspace-menu-summary-art-image {
+  animation-play-state: running;
+  will-change: transform, opacity;
+}
+
+.pf-workspace-menu-summary-art[data-workspace-motion-inview] .pf-workspace-menu-summary-art-image {
+  will-change: transform;
+}
+
+:root[data-workspace-document-motion="paused"] .pf-workspace-menu-summary-art::before,
+:root[data-workspace-document-motion="paused"] .pf-workspace-menu-summary-art::after,
+:root[data-workspace-document-motion="paused"] .pf-workspace-menu-summary-art-ribbon,
+:root[data-workspace-document-motion="paused"] .pf-workspace-menu-summary-art-image {
+  animation-play-state: paused;
+  will-change: auto;
+}
+
 .pf-workspace-menu-summary-art-image {
   position: absolute;
   inset: 8px;
@@ -4972,7 +5020,8 @@ textarea {
     inset 0 1px 0 rgb(255 255 255 / 0.2);
   transform: translate3d(0, 0, 0) scale(1.01);
   animation: pf-workspace-art-image-drift 18s var(--pf-motion-standard) infinite alternate;
-  will-change: transform;
+  animation-play-state: paused;
+  will-change: auto;
 }
 
 .pf-workspace-menu-summary-art--landscape .pf-workspace-menu-summary-art-image,
@@ -5054,13 +5103,27 @@ textarea {
 }
 
 .pf-workspace-gallery-strip {
-  display: flex;
-  gap: 18px;
+  display: block;
   margin-top: 26px;
-  overflow-x: auto;
+  overflow: hidden;
   overscroll-behavior-x: contain;
   padding: 2px 0 16px;
-  scrollbar-width: thin;
+  contain: paint;
+  touch-action: pan-y;
+  cursor: grab;
+}
+
+.pf-workspace-gallery-strip:active {
+  cursor: grabbing;
+}
+
+.pf-workspace-gallery-strip-track {
+  display: flex;
+  gap: 18px;
+  width: max-content;
+  min-width: 100%;
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
 }
 
 .pf-workspace-gallery-strip-card {
@@ -5070,6 +5133,7 @@ textarea {
   overflow: hidden;
   border-radius: var(--pf-radius-workspace-card);
   background: rgb(18 21 18 / 0.045);
+  contain: paint;
 }
 
 .pf-workspace-gallery-strip-core {
@@ -5080,12 +5144,14 @@ textarea {
   background:
     linear-gradient(155deg, rgb(252 249 241 / 0.94), rgb(228 232 218 / 0.72)),
     linear-gradient(35deg, rgb(18 21 18 / 0.08), transparent);
+  contain: paint;
 }
 
 .pf-workspace-gallery-strip-core img {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  content-visibility: auto;
 }
 
 .pf-workspace-system-grid {
@@ -5718,7 +5784,23 @@ textarea {
   inset: 3px;
   border: 1px solid rgb(255 255 255 / 0.28);
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.04);
-  animation: pf-weather-logo-breathe 3.2s var(--pf-motion-standard) infinite;
+}
+
+:root[data-weather-motion="pulse"][data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger::after {
+  animation: pf-weather-logo-breathe 3.2s var(--pf-motion-standard) 1;
+}
+
+:root[data-weather-motion="pulse"][data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger::before {
+  animation: pf-weather-logo-drift 4.8s var(--pf-motion-standard) 1 alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-weather-motion="pulse"] .pf-workspace-weather-logo::before,
+  :root[data-weather-motion="pulse"] .pf-workspace-weather-logo::after,
+  :root[data-weather-motion="pulse"][data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger::before,
+  :root[data-weather-motion="pulse"][data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger::after {
+    animation: none;
+  }
 }
 
 :root[data-ui-layout-scheme="workspace"] .pf-shell-brand-chip .pf-shell-weather-trigger svg {

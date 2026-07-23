@@ -818,7 +818,7 @@ export const zhCN = {
   "gallery.description": "由 AI 生成的创意作品，灵感无限，想象即现实。",
   "gallery.workspace.eyebrow": "媒体概览",
   "gallery.workspace.title": "画廊概览",
-  "gallery.workspace.description": "近期生成与入库图片的横向浏览。",
+  "gallery.workspace.description": "近期生成与分享的生成作品。",
   "gallery.workspace.latestTitle": "横向作品流",
   "gallery.workspace.latestDescription": "横向滚动，滑到末尾自动加载。",
   "gallery.workspace.loadMore": "加载更多",

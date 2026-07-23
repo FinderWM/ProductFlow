@@ -17,9 +17,13 @@ import {
 } from "./uiLayoutScheme";
 import {
   WORKSPACE_AMBIENT_GLOW_CLASS,
+  WORKSPACE_AMBIENT_IDLE_MS,
   WORKSPACE_CURSOR_X_PROPERTY,
   WORKSPACE_CURSOR_Y_PROPERTY,
+  WORKSPACE_DOCUMENT_MOTION_DATASET,
   workspaceAmbientGlowTransform,
+  workspaceAmbientPointerOnBackground,
+  workspaceDocumentMotionState,
   workspacePointerCssValues,
 } from "./workspaceMotion";
 import { workspaceAppearanceResolvedTheme } from "./workspaceAppearance";
@@ -241,18 +245,46 @@ export function UiLayoutSchemeProvider({
     clearWorkspacePointerVars(root);
 
     if (activeScheme !== "workspace") {
+      delete root.dataset[WORKSPACE_DOCUMENT_MOTION_DATASET];
       document.querySelectorAll<HTMLElement>(`.${WORKSPACE_AMBIENT_GLOW_CLASS}`).forEach((node) => node.remove());
       return;
     }
 
     const finePointer = window.matchMedia?.("(hover: hover) and (pointer: fine)");
     let frameId = 0;
+    let idleTimer = 0;
     let lastPointer: PointerEvent | null = null;
     let lastAppliedTransform = "";
     let listening = false;
     let glow: HTMLElement | null = null;
 
+    const setDocumentMotionState = () => {
+      root.dataset[WORKSPACE_DOCUMENT_MOTION_DATASET] = workspaceDocumentMotionState(document.hidden);
+    };
+
+    const setGlowWillChange = (active: boolean) => {
+      if (!glow?.isConnected) {
+        return;
+      }
+      glow.style.willChange = active ? "transform" : "auto";
+    };
+
+    const markGlowActive = () => {
+      setGlowWillChange(true);
+      if (idleTimer !== 0) {
+        window.clearTimeout(idleTimer);
+      }
+      idleTimer = window.setTimeout(() => {
+        idleTimer = 0;
+        setGlowWillChange(false);
+      }, WORKSPACE_AMBIENT_IDLE_MS);
+    };
+
     const disposeGlow = () => {
+      if (idleTimer !== 0) {
+        window.clearTimeout(idleTimer);
+        idleTimer = 0;
+      }
       removeWorkspaceAmbientGlow(glow);
       document.querySelectorAll<HTMLElement>(`.${WORKSPACE_AMBIENT_GLOW_CLASS}`).forEach((node) => node.remove());
       glow = null;
@@ -265,12 +297,15 @@ export function UiLayoutSchemeProvider({
       }
       glow = ensureWorkspaceAmbientGlow();
       lastAppliedTransform = "";
+      if (glow) {
+        glow.style.willChange = "auto";
+      }
       return glow;
     };
 
     const applyAmbientTransform = () => {
       frameId = 0;
-      if (!lastPointer) {
+      if (!lastPointer || document.hidden) {
         return;
       }
       const target = resolveGlow();
@@ -285,10 +320,15 @@ export function UiLayoutSchemeProvider({
       }
       lastAppliedTransform = nextTransform;
       target.style.transform = nextTransform;
+      markGlowActive();
     };
 
     const handlePointerMove = (event: PointerEvent) => {
-      if (event.pointerType === "touch") {
+      if (event.pointerType === "touch" || document.hidden) {
+        return;
+      }
+      // Only follow when the pointer hits bare shell background, not page UI layers.
+      if (!workspaceAmbientPointerOnBackground(event.target, workspaceAmbientHost())) {
         return;
       }
       lastPointer = event;
@@ -299,7 +339,7 @@ export function UiLayoutSchemeProvider({
 
     let hostRetryId = 0;
 
-    const stopListening = () => {
+    const stopListening = ({ dispose = true }: { dispose?: boolean } = {}) => {
       if (listening) {
         document.removeEventListener("pointermove", handlePointerMove);
         listening = false;
@@ -313,15 +353,26 @@ export function UiLayoutSchemeProvider({
         window.cancelAnimationFrame(hostRetryId);
         hostRetryId = 0;
       }
-      disposeGlow();
+      if (idleTimer !== 0) {
+        window.clearTimeout(idleTimer);
+        idleTimer = 0;
+      }
+      if (dispose) {
+        disposeGlow();
+      } else {
+        setGlowWillChange(false);
+      }
       clearWorkspacePointerVars(root);
     };
 
     const startListening = () => {
-      if (listening) {
+      if (listening || document.hidden) {
         return;
       }
       glow = ensureWorkspaceAmbientGlow();
+      if (glow) {
+        glow.style.willChange = "auto";
+      }
       document.addEventListener("pointermove", handlePointerMove, { passive: true });
       listening = true;
       // Lazy routes may mount .pf-workspace after this effect; retry until shell exists.
@@ -329,10 +380,13 @@ export function UiLayoutSchemeProvider({
         let attempts = 0;
         const retryHost = () => {
           hostRetryId = 0;
-          if (!listening || glow?.isConnected) {
+          if (!listening || glow?.isConnected || document.hidden) {
             return;
           }
           glow = ensureWorkspaceAmbientGlow();
+          if (glow) {
+            glow.style.willChange = "auto";
+          }
           if (!glow && attempts++ < 90) {
             hostRetryId = window.requestAnimationFrame(retryHost);
           }
@@ -342,23 +396,36 @@ export function UiLayoutSchemeProvider({
     };
 
     const syncPointerMode = () => {
+      if (document.hidden) {
+        stopListening({ dispose: false });
+        return;
+      }
       if (finePointer && !finePointer.matches) {
-        stopListening();
+        stopListening({ dispose: true });
         return;
       }
       startListening();
     };
 
+    const handleVisibilityChange = () => {
+      setDocumentMotionState();
+      syncPointerMode();
+    };
+
+    setDocumentMotionState();
     syncPointerMode();
     finePointer?.addEventListener("change", syncPointerMode);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       finePointer?.removeEventListener("change", syncPointerMode);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (hostRetryId !== 0) {
         window.cancelAnimationFrame(hostRetryId);
         hostRetryId = 0;
       }
-      stopListening();
+      stopListening({ dispose: true });
+      delete root.dataset[WORKSPACE_DOCUMENT_MOTION_DATASET];
     };
   }, [activeScheme]);
 

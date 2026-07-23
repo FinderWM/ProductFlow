@@ -820,7 +820,7 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "gallery.description": "AI が生成した作品。レビューと再利用のために保存されています。",
   "gallery.workspace.eyebrow": "メディア概要",
   "gallery.workspace.title": "ギャラリー概要",
-  "gallery.workspace.description": "最近生成・保存した画像を横方向に閲覧します。",
+  "gallery.workspace.description": "最近生成・共有した作品。",
   "gallery.workspace.latestTitle": "横スクロール作品",
   "gallery.workspace.latestDescription": "横方向にスクロールし、末尾で追加読み込みします。",
   "gallery.workspace.loadMore": "さらに読み込む",

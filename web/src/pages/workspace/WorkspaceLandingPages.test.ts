@@ -168,6 +168,19 @@ describe("workspace landing privacy filters", () => {
     ).toEqual(["resource-library", "chat", "status"]);
   });
 
+  it("keeps gallery first in the workspace home quick nav order", () => {
+    expect(
+      workspaceHomeVisibleAnchorIds({
+        resourceLibrary: true,
+        inspirations: true,
+        imageChat: true,
+        gallery: true,
+        status: true,
+        usageStats: true,
+      }),
+    ).toEqual(["gallery", "resource-library", "workspace", "chat", "status", "usage-stats"]);
+  });
+
   it("uses the same anchor activation offset as the section scroll margin contract", () => {
     expect(workspaceHomeAnchorSelectionOffset(981)).toBe(112);
     expect(workspaceHomeAnchorSelectionOffset(980)).toBe(94);

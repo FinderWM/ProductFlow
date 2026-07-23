@@ -49,6 +49,13 @@ import type {
   ResourceLibrarySourceType,
   UserUsageStatsSummary,
 } from "../../lib/types";
+import {
+  WORKSPACE_MOTION_INVIEW_ATTR,
+  workspaceContinuousMotionAllowed,
+  workspaceGalleryClampOffset,
+  workspaceGalleryMaxOffset,
+  workspaceGalleryTrackTransform,
+} from "../../lib/workspaceMotion";
 import { galleryEntrySizeLabel } from "../gallery/helpers";
 import { galleryAdminRemovedLabel } from "../gallery/moderation";
 import { inspirationKeyInfo, inspirationMainThumbnailUrl } from "../InspirationListPage.helpers";
@@ -71,10 +78,10 @@ const RESOURCE_LIBRARY_SOURCE_TYPES: ResourceLibrarySourceType[] = [
   "upload",
 ];
 const WORKSPACE_HOME_ANCHORS = [
+  { id: "gallery", labelKey: "nav.gallery" },
   { id: "resource-library", labelKey: "nav.resourceLibrary" },
   { id: "workspace", labelKey: "nav.inspirations" },
   { id: "chat", labelKey: "nav.imageChat" },
-  { id: "gallery", labelKey: "nav.gallery" },
   { id: "status", labelKey: "nav.status" },
   { id: "usage-stats", labelKey: "nav.usageStats" },
 ] as const satisfies readonly { id: string; labelKey: TranslationKey }[];
@@ -606,12 +613,14 @@ export function WorkspaceRegionSkeleton({
   if (profile === "gallery") {
     return (
       <div className="pf-workspace-gallery-strip">
-        {[1, 2, 3].map((item) => (
-          <div key={item} className="pf-workspace-gallery-strip-card">
-            <Skeleton className="pf-workspace-gallery-strip-core min-h-44 w-full" rounded="lg" />
-            <Skeleton className="mx-1 mt-2 h-3 w-2/3" />
-          </div>
-        ))}
+        <div className="pf-workspace-gallery-strip-track">
+          {[1, 2, 3].map((item) => (
+            <div key={item} className="pf-workspace-gallery-strip-card">
+              <Skeleton className="pf-workspace-gallery-strip-core min-h-44 w-full" rounded="lg" />
+              <Skeleton className="mx-1 mt-2 h-3 w-2/3" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -920,21 +929,92 @@ function useWorkspaceResolvedArtImage(
   return resolvedImage;
 }
 
+function useWorkspaceMotionInView(
+  ref: RefObject<HTMLElement | null>,
+  enabled = true,
+  observeKey: string | number | boolean | null = null,
+): boolean {
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) {
+      setInView(false);
+      const node = ref.current;
+      node?.removeAttribute(WORKSPACE_MOTION_INVIEW_ATTR);
+      return;
+    }
+
+    const node = ref.current;
+    if (!node) {
+      setInView(false);
+      return;
+    }
+
+    if (typeof IntersectionObserver === "undefined") {
+      node.setAttribute(WORKSPACE_MOTION_INVIEW_ATTR, "");
+      setInView(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          node.setAttribute(WORKSPACE_MOTION_INVIEW_ATTR, "");
+        } else {
+          node.removeAttribute(WORKSPACE_MOTION_INVIEW_ATTR);
+        }
+        setInView(entry.isIntersecting);
+      },
+      { rootMargin: "64px 0px", threshold: 0.05 },
+    );
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      node.removeAttribute(WORKSPACE_MOTION_INVIEW_ATTR);
+    };
+  }, [enabled, observeKey, ref]);
+
+  return enabled && inView;
+}
+
+function useDocumentMotionVisible(): boolean {
+  const [visible, setVisible] = useState(() =>
+    typeof document === "undefined" ? true : !document.hidden,
+  );
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    const sync = () => setVisible(!document.hidden);
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, []);
+
+  return visible;
+}
+
 function WorkspaceModuleArt({ imageCandidates = [] }: { imageCandidates?: WorkspacePreviewImageSource[] }) {
+  const artRef = useRef<HTMLElement | null>(null);
   const image = useWorkspaceResolvedArtImage(imageCandidates);
   const imageSrc = image ? api.toApiUrl(image.url) : null;
   const orientationClass = image ? ` pf-workspace-menu-summary-art--${image.orientation}` : "";
+  useWorkspaceMotionInView(artRef, true, imageSrc ?? "decorative");
 
   return (
     <aside
+      ref={artRef}
       className={`pf-workspace-menu-summary-art${imageSrc ? " pf-workspace-menu-summary-art--image" : ""}${orientationClass}`}
       aria-hidden="true"
     >
-      <div className="pf-workspace-menu-summary-art-motion">
-        <span className="pf-workspace-menu-summary-art-ribbon pf-workspace-menu-summary-art-ribbon--one" />
-        <span className="pf-workspace-menu-summary-art-ribbon pf-workspace-menu-summary-art-ribbon--two" />
-        <span className="pf-workspace-menu-summary-art-ribbon pf-workspace-menu-summary-art-ribbon--three" />
-      </div>
+      {!imageSrc ? (
+        <div className="pf-workspace-menu-summary-art-motion">
+          <span className="pf-workspace-menu-summary-art-ribbon pf-workspace-menu-summary-art-ribbon--one" />
+          <span className="pf-workspace-menu-summary-art-ribbon pf-workspace-menu-summary-art-ribbon--two" />
+          <span className="pf-workspace-menu-summary-art-ribbon pf-workspace-menu-summary-art-ribbon--three" />
+        </div>
+      ) : null}
       {imageSrc ? (
         <img
           className="pf-workspace-menu-summary-art-image"
@@ -1224,10 +1304,13 @@ function WorkspaceGalleryContent() {
   const { locale, t } = useI18n();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const documentVisible = useDocumentMotionVisible();
   const [galleryOffset, setGalleryOffset] = useState(0);
-  const [galleryStripVisible, setGalleryStripVisible] = useState(false);
   const [galleryScrollMax, setGalleryScrollMax] = useState(0);
-  const stripRef = useRef<HTMLDivElement | null>(null);
+  const [autoScrollPaused, setAutoScrollPaused] = useState(false);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const trackOffsetRef = useRef(0);
   const runtimeConfigQuery = useQuery({
     queryKey: ["runtime-config"],
     queryFn: api.getRuntimeConfig,
@@ -1270,56 +1353,56 @@ function WorkspaceGalleryContent() {
     galleryState.content === "ready" && !galleryQuery.isPlaceholderData;
   const galleryErrorMessage =
     galleryQuery.error instanceof ApiError ? galleryQuery.error.detail : t("gallery.loadFailed");
+  const galleryStripVisible = useWorkspaceMotionInView(
+    viewportRef,
+    galleryInteractionReady && entries.length > 0,
+    `${galleryOffset}:${entries.length}:${galleryState.content}`,
+  );
+  const motionAllowed = workspaceContinuousMotionAllowed({
+    inView: galleryStripVisible,
+    documentHidden: !documentVisible,
+  });
+
+  const applyTrackOffset = useCallback((offsetPx: number, maxOffset = galleryScrollMax) => {
+    const track = trackRef.current;
+    const nextOffset = workspaceGalleryClampOffset(offsetPx, maxOffset);
+    trackOffsetRef.current = nextOffset;
+    if (track) {
+      track.style.transform = workspaceGalleryTrackTransform(nextOffset);
+    }
+    return nextOffset;
+  }, [galleryScrollMax]);
 
   useEffect(() => {
-    stripRef.current?.scrollTo({ left: 0 });
-  }, [galleryOffset]);
+    applyTrackOffset(0);
+  }, [applyTrackOffset, galleryOffset]);
 
   useEffect(() => {
-    const root = stripRef.current;
-    if (!root || !galleryInteractionReady || entries.length === 0) {
+    const viewport = viewportRef.current;
+    const track = trackRef.current;
+    if (!viewport || !track || !galleryInteractionReady || entries.length === 0) {
       setGalleryScrollMax(0);
       return;
     }
 
     const updateScrollMax = () => {
-      const nextScrollMax = Math.max(0, root.scrollWidth - root.clientWidth);
+      const nextScrollMax = workspaceGalleryMaxOffset(track.scrollWidth, viewport.clientWidth);
       setGalleryScrollMax((current) => (current === nextScrollMax ? current : nextScrollMax));
+      applyTrackOffset(trackOffsetRef.current, nextScrollMax);
     };
 
     updateScrollMax();
     window.addEventListener("resize", updateScrollMax);
 
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateScrollMax);
-    resizeObserver?.observe(root);
+    resizeObserver?.observe(viewport);
+    resizeObserver?.observe(track);
 
     return () => {
       window.removeEventListener("resize", updateScrollMax);
       resizeObserver?.disconnect();
     };
-  }, [entries.length, galleryInteractionReady]);
-
-  useEffect(() => {
-    const root = stripRef.current;
-    if (!root || !galleryInteractionReady || entries.length === 0) {
-      setGalleryStripVisible(false);
-      return;
-    }
-
-    if (typeof IntersectionObserver === "undefined") {
-      setGalleryStripVisible(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        setGalleryStripVisible(entry.isIntersecting);
-      },
-      { threshold: 0.05 },
-    );
-    observer.observe(root);
-    return () => observer.disconnect();
-  }, [entries.length, galleryInteractionReady]);
+  }, [applyTrackOffset, entries.length, galleryInteractionReady, galleryOffset]);
 
   useEffect(() => {
     if (galleryLoopTargetOffset === null || galleryLoopTargetOffset === galleryOffset) {
@@ -1363,20 +1446,105 @@ function WorkspaceGalleryContent() {
   }, [galleryOffset, galleryQuery.isPlaceholderData, galleryState.content]);
 
   useEffect(() => {
-    const root = stripRef.current;
-    if (!root || !galleryStripVisible || !galleryInteractionReady || entries.length === 0) {
+    const viewport = viewportRef.current;
+    if (!viewport || !galleryInteractionReady || entries.length === 0) {
+      return;
+    }
+
+    const pause = () => setAutoScrollPaused(true);
+    const resume = () => setAutoScrollPaused(false);
+    viewport.addEventListener("pointerenter", pause);
+    viewport.addEventListener("pointerleave", resume);
+    viewport.addEventListener("focusin", pause);
+    viewport.addEventListener("focusout", resume);
+    return () => {
+      viewport.removeEventListener("pointerenter", pause);
+      viewport.removeEventListener("pointerleave", resume);
+      viewport.removeEventListener("focusin", pause);
+      viewport.removeEventListener("focusout", resume);
+    };
+  }, [entries.length, galleryInteractionReady]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !galleryInteractionReady || entries.length === 0) {
+      return;
+    }
+
+    let dragging = false;
+    let pointerId: number | null = null;
+    let startX = 0;
+    let startOffset = 0;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType === "mouse" && event.button !== 0) {
+        return;
+      }
+      dragging = true;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startOffset = trackOffsetRef.current;
+      setAutoScrollPaused(true);
+      viewport.setPointerCapture(event.pointerId);
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!dragging || event.pointerId !== pointerId) {
+        return;
+      }
+      applyTrackOffset(startOffset - (event.clientX - startX));
+    };
+    const endDrag = (event: PointerEvent) => {
+      if (!dragging || event.pointerId !== pointerId) {
+        return;
+      }
+      dragging = false;
+      pointerId = null;
+      if (viewport.hasPointerCapture(event.pointerId)) {
+        viewport.releasePointerCapture(event.pointerId);
+      }
+      // Keep paused while the pointer remains over the strip (hover / focus pause owns resume).
+      if (!viewport.matches(":hover") && !viewport.contains(document.activeElement)) {
+        setAutoScrollPaused(false);
+      }
+    };
+
+    viewport.addEventListener("pointerdown", onPointerDown);
+    viewport.addEventListener("pointermove", onPointerMove);
+    viewport.addEventListener("pointerup", endDrag);
+    viewport.addEventListener("pointercancel", endDrag);
+    return () => {
+      viewport.removeEventListener("pointerdown", onPointerDown);
+      viewport.removeEventListener("pointermove", onPointerMove);
+      viewport.removeEventListener("pointerup", endDrag);
+      viewport.removeEventListener("pointercancel", endDrag);
+    };
+  }, [applyTrackOffset, entries.length, galleryInteractionReady]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !galleryInteractionReady || entries.length === 0) {
+      return;
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaX) < Math.abs(event.deltaY) && Math.abs(event.deltaX) < 1) {
+        return;
+      }
+      event.preventDefault();
+      applyTrackOffset(trackOffsetRef.current + event.deltaX + event.deltaY);
+    };
+
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
+  }, [applyTrackOffset, entries.length, galleryInteractionReady]);
+
+  useEffect(() => {
+    if (!motionAllowed || autoScrollPaused || !galleryInteractionReady || entries.length === 0) {
       return;
     }
     let animationFrame = 0;
     let lastTime = window.performance.now();
     let staticPageDwellMs = 0;
-    let virtualScrollLeft = root.scrollLeft;
-    const syncScrollPosition = () => {
-      virtualScrollLeft = root.scrollLeft;
-    };
-    root.addEventListener("pointerdown", syncScrollPosition, { passive: true });
-    root.addEventListener("touchstart", syncScrollPosition, { passive: true });
-    root.addEventListener("wheel", syncScrollPosition, { passive: true });
 
     const tick = (time: number) => {
       const elapsed = Math.min(time - lastTime, 64);
@@ -1393,18 +1561,15 @@ function WorkspaceGalleryContent() {
         }
       } else {
         staticPageDwellMs = 0;
-        virtualScrollLeft = Math.min(
-          galleryScrollMax,
-          virtualScrollLeft + (GALLERY_STRIP_SCROLL_SPEED_PX_PER_SECOND * elapsed) / 1000,
+        const nextOffset = applyTrackOffset(
+          trackOffsetRef.current + (GALLERY_STRIP_SCROLL_SPEED_PX_PER_SECOND * elapsed) / 1000,
         );
-        root.scrollLeft = virtualScrollLeft;
-        if (virtualScrollLeft >= galleryScrollMax - 1) {
+        if (nextOffset >= galleryScrollMax - 1) {
           if (galleryLoopTargetOffset !== null) {
             setGalleryOffset(galleryLoopTargetOffset);
             return;
           }
-          virtualScrollLeft = 0;
-          root.scrollLeft = 0;
+          applyTrackOffset(0);
         }
       }
 
@@ -1414,17 +1579,16 @@ function WorkspaceGalleryContent() {
     animationFrame = window.requestAnimationFrame(tick);
     return () => {
       window.cancelAnimationFrame(animationFrame);
-      root.removeEventListener("pointerdown", syncScrollPosition);
-      root.removeEventListener("touchstart", syncScrollPosition);
-      root.removeEventListener("wheel", syncScrollPosition);
     };
   }, [
+    applyTrackOffset,
+    autoScrollPaused,
     entries.length,
-    galleryOffset,
     galleryInteractionReady,
     galleryLoopTargetOffset,
+    galleryOffset,
     galleryScrollMax,
-    galleryStripVisible,
+    motionAllowed,
   ]);
 
   return (
@@ -1455,15 +1619,17 @@ function WorkspaceGalleryContent() {
               </>
             )}
           >
-            <div ref={stripRef} className="pf-workspace-gallery-strip">
-              {entries.map((entry) => (
-                <GalleryStripItem
-                  key={entry.id}
-                  entry={entry}
-                  locale={locale}
-                  showGenerationResourceGroup={showGenerationResourceGroup}
-                />
-              ))}
+            <div ref={viewportRef} className="pf-workspace-gallery-strip">
+              <div ref={trackRef} className="pf-workspace-gallery-strip-track">
+                {entries.map((entry) => (
+                  <GalleryStripItem
+                    key={entry.id}
+                    entry={entry}
+                    locale={locale}
+                    showGenerationResourceGroup={showGenerationResourceGroup}
+                  />
+                ))}
+              </div>
             </div>
             <span className="pf-workspace-muted mt-2 inline-flex text-xs">
               {t("gallery.count", { count: galleryTotal })}
@@ -2136,6 +2302,16 @@ export function WorkspaceHomePage() {
           {greeting}
         </div>
 
+        {canReadGallery ? (
+          <WorkspaceHomeSection
+            id="gallery"
+            title={t("nav.gallery")}
+            description={t("gallery.workspace.description")}
+          >
+            <WorkspaceGalleryContent />
+          </WorkspaceHomeSection>
+        ) : null}
+
         {canUseResourceLibrary ? (
           <WorkspaceHomeSection
             id="resource-library"
@@ -2163,16 +2339,6 @@ export function WorkspaceHomePage() {
             description={t("chat.workspace.description")}
           >
             <WorkspaceImageChatContent />
-          </WorkspaceHomeSection>
-        ) : null}
-
-        {canReadGallery ? (
-          <WorkspaceHomeSection
-            id="gallery"
-            title={t("nav.gallery")}
-            description={t("gallery.workspace.description")}
-          >
-            <WorkspaceGalleryContent />
           </WorkspaceHomeSection>
         ) : null}
 

@@ -820,7 +820,7 @@ export const enUS: Record<keyof typeof zhCN, string> = {
   "gallery.description": "AI-generated creative work, saved for review and reuse.",
   "gallery.workspace.eyebrow": "Media overview",
   "gallery.workspace.title": "Gallery overview",
-  "gallery.workspace.description": "A horizontal browse of recent generated and saved images.",
+  "gallery.workspace.description": "Recently generated and shared works.",
   "gallery.workspace.latestTitle": "Horizontal media strip",
   "gallery.workspace.latestDescription": "Scroll horizontally; reaching the end loads more.",
   "gallery.workspace.loadMore": "Load more",

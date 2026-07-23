@@ -25,6 +25,7 @@ import {
   subscribeWeatherSettingsChange,
   type WeatherSettings,
 } from "./weatherSources";
+import { clearWeatherLogoMotion, pulseWeatherLogoMotion } from "./workspaceMotion";
 
 export const WEATHER_LOCATION_STORAGE_KEY = "inspiration-one.weather-location";
 export const WEATHER_LOCATION_V2_STORAGE_KEY = "inspiration-one.weather-location-v2";
@@ -412,6 +413,16 @@ export function CurrentWeatherProvider({ children, enabled }: { children: ReactN
       setManualRefreshErrorKey(null);
     }
   }, [weatherQuery.dataUpdatedAt, weatherQuery.isSuccess]);
+
+  // Brief logo motion when weather data settles after a fetch/refetch.
+  useEffect(() => {
+    if (!enabled || !weatherQuery.data || weatherQuery.dataUpdatedAt <= 0) {
+      return;
+    }
+    pulseWeatherLogoMotion();
+  }, [enabled, weatherQuery.data, weatherQuery.dataUpdatedAt]);
+
+  useEffect(() => () => clearWeatherLogoMotion(), []);
 
   useEffect(() => {
     const alertKey = pendingSourceSwitchWeatherKeyRef.current;
