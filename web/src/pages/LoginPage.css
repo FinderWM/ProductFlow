@@ -2749,6 +2749,24 @@
   }
 }
 
+/* Pause ambient (infinite) animations while the login page is idle or the tab
+   is hidden; `useLoginMotionLifecycle` toggles the root dataset on any input. */
+:root[data-login-motion="paused"] .pf-login-orbit::after,
+:root[data-login-motion="paused"] .pf-login-orbit .pointer-glow,
+:root[data-login-motion="paused"] .pf-login-orbit .orbit,
+:root[data-login-motion="paused"] .pf-login-orbit .auth-core::before,
+:root[data-login-motion="paused"] .pf-login-orbit .auth-core::after,
+:root[data-login-motion="paused"] .pf-login-mist .mesh-blob,
+:root[data-login-motion="paused"] .pf-login-mist .sparkle-dot,
+:root[data-login-motion="paused"] .pf-login-lab::before,
+:root[data-login-motion="paused"] .pf-login-lab::after,
+:root[data-login-motion="paused"] .pf-login-lab .page::before,
+:root[data-login-motion="paused"] .pf-login-lab .entry-frame::before,
+:root[data-login-motion="paused"] .pf-login-lab .entry-frame::after,
+:root[data-login-motion="paused"] .pf-login-lab .panel-kicker {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pf-login-orbit *,
   .pf-login-orbit *::before,

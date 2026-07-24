@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { api, ApiError } from "../lib/api";
+import { useLoginMotionLifecycle } from "../lib/loginMotion";
 import { useI18n } from "../lib/preferences";
 import type { LoginPageConfig, LoginPageTemplateId } from "../lib/types";
 import "./LoginPage.css";
@@ -129,6 +130,7 @@ function clearCommandOrbitPointerEffect(event: PointerEvent<HTMLElement>, effect
 
 export function LoginPage({ authenticated, authenticatedRedirectPath, templateId }: LoginPageProps) {
   const { t } = useI18n();
+  useLoginMotionLifecycle();
   const [mode, setModeState] = useState<"login" | "password">("login");
   const [username, setUsername] = useState("");
   const [setupToken, setSetupToken] = useState("");
