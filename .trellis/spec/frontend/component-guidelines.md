@@ -244,6 +244,49 @@ When adding new forms, keep keyboard/focus behavior at least as strong as these 
 
 ---
 
+## Login Page Ambient Animation Contract
+
+The login templates (`command-orbit`, `fluid-mist`, `image-lab` in `web/src/pages/LoginPage.tsx` / `LoginPage.css`)
+carry continuous ambient animation on an unauthenticated surface, so every effect must stay compositor-cheap. Current
+rules learned from the 2026-07 GPU pass:
+
+- **Infinite animations must be transform/opacity-only.** Never animate registered custom properties (`@property`) that
+  feed `background` / `box-shadow` / `filter` — keyframing them forces per-frame main-thread repaints. Split the effect
+  into stacked layers instead: a base layer holds static low-intensity `background`/`box-shadow`, and a sibling layer
+  carries the animated delta with an opacity-only keyframe. Reference: `.orbit` (drift transform keyframes) +
+  `.orbit-pulse` (scale/opacity) + `.orbit-glow` (opacity breath) replacing the old `orbitHeartbeat` repaint loop.
+- **Do not animate custom properties in keyframes at all.** Convert `--foo` keyframe writes into plain
+  `transform`/`opacity` keyframes on the element or a `::before` carrier. Pointer-linked values are still written from
+  JS to the element; custom properties inherit, so a `::before` reads them without extra JS. Reference: `mistBlobFloat`
+  / `mistSparkle` (previous `--blob-drift-*` / `--spark-drift-*` / `--spark-alpha` keyframe writes deleted).
+- **Avoid resident large-radius `filter: blur()`.** Pre-blur the visual into the gradient stops (solid stop pulled
+  inward, long transparent tail) on a `::before`; verify against a screenshot that it matches the blur version.
+  Reference: `.mesh-blob::before` radial-gradients replacing `filter: blur(100px)`.
+- **Pointer-following effects need a real driver or are dead code.** If a custom property (e.g. `--cursor-x/y`) has no
+  JS writer, the animation is decorative-only — either wire it or delete it. The wired pattern is: mount-time
+  `(pointer: fine)` + non-reduced-motion guard, `data-pointer-driven` attribute to disable the CSS drift fallback,
+  document-level passive `pointermove` → `requestAnimationFrame` → `quantizeWorkspacePointerCoordinate()` from
+  `web/src/lib/workspaceMotion.ts` → direct `el.style.transform` write; skip writes while
+  `document.documentElement.dataset.loginMotion === "paused"`. Reference: `.pointer-glow` in `CommandOrbitLogin`.
+- **Idle pause must cover every new animated layer.** `useLoginMotionLifecycle` toggles
+  `data-login-motion="paused"` on the root; the pause selector block at the end of `LoginPage.css` must list every
+  element/pseudo-element that carries an infinite animation. When adding a layer (e.g. `.orbit-pulse`, `.orbit-glow`),
+  extend the selector in the same change.
+- **Effects that depend on sibling combination must compose exactly.** When an animated parent (drift/opacity
+  keyframes) composes with a pointer-driven `::before` (box-shadow/filter/translate), verify the math: e.g. sparkle
+  `::before` opacity is `calc(var(--spark-pointer-glow) / 0.26)` so parent peak opacity 1.0 × child ≤ 1 lands on the
+  intended final opacity.
+
+### Common Mistake: `window.matchMedia` is not guaranteed in tests
+
+**Symptom**: `TypeError: window.matchMedia is not a function` in Vitest/jsdom when a mount effect calls it directly.
+
+**Fix**: guard with `typeof window.matchMedia === "function"` (or reuse the existing
+`canUseCommandOrbitPointerMotion()` helper, which is safe to extend with the typeof check) before any mount-effect
+media query in `LoginPage.tsx`. Pointer-event handlers that only run in browsers may call it directly.
+
+---
+
 ## Data Fetching Boundary
 
 Shared components should not call the API directly today. API calls live in pages through TanStack Query and the central
@@ -368,7 +411,7 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 
 ### 7. Wrong vs Correct
 
-#### Wrong
+#### Wrong（共享尺寸选择器）
 
 ```tsx
 <input value={draft.size} onChange={(event) => onDraftChange({ ...draft, size: event.target.value })} />
@@ -376,7 +419,7 @@ preview-sized assets, explicit download actions should use download URLs, and ro
 
 This creates a second workflow-only size UI and bypasses the shared custom/preset behavior.
 
-#### Correct
+#### Correct（共享尺寸选择器）
 
 ```tsx
 <ImageSizePicker
@@ -527,19 +570,19 @@ Correct:
 
 ### 7. Wrong vs Correct
 
-#### Wrong
+#### Wrong（画廊展示页）
 
 ```tsx
 fetch('/api/gallery')
 ```
 
-#### Correct
+#### Correct（画廊展示页）
 
 ```tsx
 useQuery({ queryKey: ['gallery'], queryFn: api.listGalleryEntries })
 ```
 
-#### Wrong
+#### Wrong（宫格行距）
 
 ```tsx
 const rowSpan = Math.ceil(tileHeight / 8)
@@ -547,13 +590,13 @@ const rowSpan = Math.ceil(tileHeight / 8)
 
 This ignores the `gap-4` space that CSS Grid adds between every spanned row.
 
-#### Correct
+#### Correct（宫格行距）
 
 ```tsx
 const rowSpan = Math.ceil((tileHeight + gridGapPx) / (rowUnitPx + gridGapPx))
 ```
 
-#### Wrong
+#### Wrong（宫格列宽）
 
 ```tsx
 const tileWidth = (1280 * columnSpan) / 12
@@ -561,7 +604,7 @@ const tileWidth = (1280 * columnSpan) / 12
 
 This ignores the 11 grid gaps in a 12-column desktop grid.
 
-#### Correct
+#### Correct（宫格列宽）
 
 ```tsx
 const columnWidth = (gridWidth - gridGapPx * (columns - 1)) / columns
