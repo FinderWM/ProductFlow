@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api, ApiError } from "../lib/api";
 import { useLoginMotionLifecycle } from "../lib/loginMotion";
+import { quantizeWorkspacePointerCoordinate } from "../lib/workspaceMotion";
 import { useI18n } from "../lib/preferences";
 import type { LoginPageConfig, LoginPageTemplateId } from "../lib/types";
 import "./LoginPage.css";
@@ -236,10 +237,54 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
     config.content.hero_description,
     "从灵感编排、图像会话到素材沉淀，Inspiration One 将创作链路收束成一座私有控制台。",
   );
+  const pointerGlowRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const glow = pointerGlowRef.current;
+    if (!glow || typeof window.matchMedia !== "function" || !canUseCommandOrbitPointerMotion()) {
+      return undefined;
+    }
+
+    glow.dataset.pointerDriven = "";
+    let frame = 0;
+    let nextX = 0;
+    let nextY = 0;
+
+    const writeTransform = () => {
+      frame = 0;
+      if (document.documentElement.dataset.loginMotion === "paused") {
+        return;
+      }
+      glow.style.transform = `translate3d(${nextX - 260}px, ${nextY - 260}px, 0)`;
+    };
+
+    const scheduleWrite = (clientX: number, clientY: number) => {
+      nextX = quantizeWorkspacePointerCoordinate(clientX);
+      nextY = quantizeWorkspacePointerCoordinate(clientY);
+      if (!frame) {
+        frame = window.requestAnimationFrame(writeTransform);
+      }
+    };
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      scheduleWrite(event.clientX, event.clientY);
+    };
+
+    document.addEventListener("pointermove", handlePointerMove, { passive: true });
+
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      delete glow.dataset.pointerDriven;
+      glow.style.transform = "";
+    };
+  }, []);
 
   return (
     <div className={`pf-login-orbit ${form.mode === "password" ? "is-setup" : "is-login"}`}>
-      <div className="pointer-glow" aria-hidden="true" />
+      <div className="pointer-glow" aria-hidden="true" ref={pointerGlowRef} />
       <main className="stage">
         <div className="brand">
           <div>
