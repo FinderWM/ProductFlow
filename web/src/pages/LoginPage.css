@@ -161,8 +161,6 @@
   --shadow: 0 34px 90px rgba(1, 9, 8, 0.32);
   --glow: 0 0 48px rgba(121, 214, 188, 0.16);
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
-  --cursor-x: 50vw;
-  --cursor-y: 50vh;
   --orbit-x: 0px;
   --orbit-y: 0px;
   --auth-center-x: 57.6%;
@@ -173,8 +171,6 @@
   --auth-card-x: 0px;
   --auth-card-y: 0px;
   --auth-card-tilt: 0deg;
-  --satellite-x: 0px;
-  --satellite-y: 0px;
   --login-chip-x: 0px;
   --login-chip-y: 0px;
   --login-chip-tilt: 0deg;
@@ -446,8 +442,8 @@
 .pf-login-orbit .auth-core::after {
   opacity: 0;
   background:
-    linear-gradient(96deg, transparent 0 18%, rgba(121, 214, 188, 0.22) 18.2% 18.8%, transparent 19% 58%),
-    linear-gradient(276deg, transparent 0 42%, rgba(237, 189, 99, 0.18) 42.2% 42.8%, transparent 43% 100%);
+    linear-gradient(96deg, transparent 0 16%, rgba(121, 214, 188, 0.5) 16.2% 19.4%, transparent 19.8% 56%),
+    linear-gradient(276deg, transparent 0 40%, rgba(237, 189, 99, 0.42) 40.2% 43.6%, transparent 44% 100%);
   mix-blend-mode: screen;
   transform: translate3d(-18%, 0, 0) skewX(-9deg);
   animation: authElectricJitter 6.4s var(--ease) infinite;
@@ -705,7 +701,7 @@
   top: auto;
   bottom: clamp(46px, 8vh, 86px);
   width: clamp(218px, 15vw, 250px);
-  transform: translate3d(var(--satellite-x), var(--satellite-y), 0) rotate(-7deg);
+  transform: rotate(-7deg);
   animation-delay: 320ms;
 }
 
@@ -734,7 +730,7 @@
   left: calc(var(--auth-center-x) + var(--auth-half-width) + var(--control-surface-gap));
   top: calc(var(--auth-center-y) + var(--control-surface-y-offset));
   width: clamp(212px, 18vw, 260px);
-  transform: translate3d(calc(var(--satellite-x) * -1), calc(var(--satellite-y) * -1), 0) rotate(5deg);
+  transform: rotate(5deg);
   animation-delay: 400ms;
 }
 
@@ -848,28 +844,28 @@
 
 @keyframes authElectricJitter {
   0%,
-  66%,
+  64%,
   100% {
     opacity: 0;
     transform: translate3d(-18%, 0, 0) skewX(-9deg);
   }
 
   68% {
-    opacity: 0.22;
+    opacity: 0.6;
     transform: translate3d(5%, -2%, 0) skewX(-12deg);
   }
 
-  70% {
-    opacity: 0.05;
+  71% {
+    opacity: 0.18;
     transform: translate3d(-4%, 1%, 0) skewX(-6deg);
   }
 
-  72% {
-    opacity: 0.18;
+  75% {
+    opacity: 0.45;
     transform: translate3d(12%, 0, 0) skewX(-10deg);
   }
 
-  75% {
+  80% {
     opacity: 0;
     transform: translate3d(24%, 1%, 0) skewX(-8deg);
   }
@@ -1884,6 +1880,7 @@
 
 .pf-login-lab .scan-line {
   position: absolute;
+  top: 16px;
   left: 16px;
   right: 16px;
   z-index: 2;
@@ -1891,6 +1888,7 @@
   border-radius: 999px;
   background: linear-gradient(90deg, transparent, rgb(199 214 169 / 0.9), transparent);
   opacity: 0.82;
+  animation: labScanSweep 3.6s ease-in-out infinite alternate;
 }
 
 .pf-login-lab .meter {
@@ -2171,6 +2169,16 @@
   to {
     opacity: 0.26;
     transform: translate3d(-1.4%, 1%, 0) scale(1.03);
+  }
+}
+
+@keyframes labScanSweep {
+  from {
+    top: 16px;
+  }
+
+  to {
+    top: calc(100% - 18px);
   }
 }
 
@@ -2763,7 +2771,8 @@
 :root[data-login-motion="paused"] .pf-login-lab .page::before,
 :root[data-login-motion="paused"] .pf-login-lab .entry-frame::before,
 :root[data-login-motion="paused"] .pf-login-lab .entry-frame::after,
-:root[data-login-motion="paused"] .pf-login-lab .panel-kicker {
+:root[data-login-motion="paused"] .pf-login-lab .panel-kicker,
+:root[data-login-motion="paused"] .pf-login-lab .scan-line {
   animation-play-state: paused;
 }
 

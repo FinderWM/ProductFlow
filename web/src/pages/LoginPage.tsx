@@ -658,7 +658,7 @@ function FluidMistLogin({ config, form }: { config: LoginPageConfig; form: Login
 
         <div
           ref={cardRef}
-          className="main-card float card-lift card-tilt"
+          className="main-card"
           onPointerMove={handleCardPointerMove}
           onPointerLeave={handleCardPointerLeave}
         >
