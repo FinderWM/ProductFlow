@@ -253,7 +253,11 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
           <br />
           ORBIT
         </div>
-        <div className="orbit" aria-hidden="true" />
+        <div className="orbit" aria-hidden="true">
+          <div className="orbit-pulse">
+            <div className="orbit-glow" />
+          </div>
+        </div>
 
         <section className="headline" aria-label="概念说明">
           <span className="eyebrow">ORBITAL LOGIN</span>

@@ -1,33 +1,3 @@
-@property --orbit-scale {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 1;
-}
-
-@property --orbit-glow {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 0.22;
-}
-
-@property --orbit-x {
-  syntax: "<length>";
-  inherits: true;
-  initial-value: 0px;
-}
-
-@property --orbit-y {
-  syntax: "<length>";
-  inherits: true;
-  initial-value: 0px;
-}
-
-@property --pointer-tilt {
-  syntax: "<angle>";
-  inherits: true;
-  initial-value: 0deg;
-}
-
 @property --blob-pointer-x {
   syntax: "<length>";
   inherits: true;
@@ -161,8 +131,6 @@
   --shadow: 0 34px 90px rgba(1, 9, 8, 0.32);
   --glow: 0 0 48px rgba(121, 214, 188, 0.16);
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
-  --orbit-x: 0px;
-  --orbit-y: 0px;
   --auth-center-x: 57.6%;
   --auth-center-y: 52%;
   --auth-half-width: min(260px, 19vw);
@@ -183,9 +151,6 @@
   --primary-y: 0px;
   --primary-tilt: 0deg;
   --primary-scale: 1;
-  --pointer-tilt: 0deg;
-  --orbit-scale: 1;
-  --orbit-glow: 0.22;
   position: relative;
   min-height: 100dvh;
   overflow: hidden;
@@ -309,24 +274,44 @@
   width: min(880px, 62vw);
   aspect-ratio: 1;
   border-radius: 50%;
-  background:
-    linear-gradient(128deg, rgb(121 214 188 / var(--orbit-glow)) 0 1px, transparent 1px 42%),
-    linear-gradient(44deg, transparent 0 52%, rgb(237 189 99 / var(--orbit-glow)) 52% 53%, transparent 53%);
-  box-shadow:
-    inset 0 0 0 1px rgb(247 239 226 / calc(var(--orbit-glow) * 0.52)),
-    inset 0 0 0 28px rgb(247 239 226 / calc(var(--orbit-glow) * 0.08)),
-    0 34px 90px rgba(1, 9, 8, 0.32),
-    0 0 62px rgb(121 214 188 / calc(var(--orbit-glow) * 0.36));
-  transform: translate(calc(-50% + var(--orbit-x)), calc(-50% + var(--orbit-y)))
-    rotate(calc(-12deg + var(--pointer-tilt))) scale(var(--orbit-scale));
+  transform: translate(-50%, -50%) rotate(-12deg);
   animation:
     orbitIn 1120ms var(--ease) 80ms both,
-    orbitAutonomousDrift 13s var(--ease) 1300ms infinite alternate,
-    orbitHeartbeat 3.2s var(--ease) 1300ms infinite;
+    orbitDrift 13s var(--ease) 1300ms infinite alternate;
 }
 
-.pf-login-orbit .orbit::before,
-.pf-login-orbit .orbit::after {
+.pf-login-orbit .orbit-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    linear-gradient(128deg, rgb(121 214 188 / 0.16) 0 1px, transparent 1px 42%),
+    linear-gradient(44deg, transparent 0 52%, rgb(237 189 99 / 0.16) 52% 53%, transparent 53%);
+  box-shadow:
+    inset 0 0 0 1px rgb(247 239 226 / 0.083),
+    inset 0 0 0 28px rgb(247 239 226 / 0.013),
+    0 34px 90px rgba(1, 9, 8, 0.32),
+    0 0 62px rgb(121 214 188 / 0.058);
+  animation: orbitPulse 3.2s var(--ease) 1300ms infinite;
+}
+
+.pf-login-orbit .orbit-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  opacity: 0;
+  background:
+    linear-gradient(128deg, rgb(121 214 188 / 0.15) 0 1px, transparent 1px 42%),
+    linear-gradient(44deg, transparent 0 52%, rgb(237 189 99 / 0.15) 52% 53%, transparent 53%);
+  box-shadow:
+    inset 0 0 0 1px rgb(247 239 226 / 0.078),
+    inset 0 0 0 28px rgb(247 239 226 / 0.012),
+    0 0 62px rgb(121 214 188 / 0.054);
+  animation: orbitGlowBreath 3.2s var(--ease) 1300ms infinite;
+}
+
+.pf-login-orbit .orbit-pulse::before,
+.pf-login-orbit .orbit-pulse::after {
   position: absolute;
   border-radius: 50%;
   content: "";
@@ -334,13 +319,13 @@
   transform-origin: center;
 }
 
-.pf-login-orbit .orbit::before {
+.pf-login-orbit .orbit-pulse::before {
   inset: 72px;
   opacity: 0.72;
   box-shadow: inset 0 0 0 1px rgba(247, 239, 226, 0.09), 0 0 52px rgba(121, 214, 188, 0.07);
 }
 
-.pf-login-orbit .orbit::after {
+.pf-login-orbit .orbit-pulse::after {
   inset: 180px;
   opacity: 0.82;
   background: rgba(5, 5, 5, 0.38);
@@ -909,37 +894,29 @@
   }
 }
 
-@keyframes orbitAutonomousDrift {
+@keyframes orbitDrift {
   0% {
-    --orbit-x: -8px;
-    --orbit-y: 5px;
-    --pointer-tilt: -0.65deg;
+    transform: translate(calc(-50% - 8px), calc(-50% + 5px)) rotate(-12.65deg);
   }
 
   50% {
-    --orbit-x: 9px;
-    --orbit-y: -6px;
-    --pointer-tilt: 0.8deg;
+    transform: translate(calc(-50% + 9px), calc(-50% - 6px)) rotate(-11.2deg);
   }
 
   100% {
-    --orbit-x: -3px;
-    --orbit-y: 8px;
-    --pointer-tilt: -0.3deg;
+    transform: translate(calc(-50% - 3px), calc(-50% + 8px)) rotate(-12.3deg);
   }
 }
 
 @keyframes orbitIn {
   from {
     opacity: 0;
-    transform: translate(calc(-50% + var(--orbit-x)), calc(-50% + var(--orbit-y)))
-      rotate(calc(-12deg + var(--pointer-tilt))) scale(0.88);
+    transform: translate(-50%, -50%) rotate(-12deg) scale(0.88);
   }
 
   to {
     opacity: 1;
-    transform: translate(calc(-50% + var(--orbit-x)), calc(-50% + var(--orbit-y)))
-      rotate(calc(-12deg + var(--pointer-tilt))) scale(var(--orbit-scale));
+    transform: translate(-50%, -50%) rotate(-12deg) scale(1);
   }
 }
 
@@ -969,30 +946,45 @@
   }
 }
 
-@keyframes orbitHeartbeat {
+@keyframes orbitPulse {
   0%,
   100% {
-    --orbit-scale: 1;
-    --orbit-glow: 0.16;
     opacity: 0.82;
+    transform: scale(1);
   }
 
   12% {
-    --orbit-scale: 1.026;
-    --orbit-glow: 0.31;
     opacity: 0.96;
+    transform: scale(1.026);
   }
 
   22% {
-    --orbit-scale: 0.992;
-    --orbit-glow: 0.2;
     opacity: 0.86;
+    transform: scale(0.992);
   }
 
   36% {
-    --orbit-scale: 1.014;
-    --orbit-glow: 0.26;
     opacity: 0.92;
+    transform: scale(1.014);
+  }
+}
+
+@keyframes orbitGlowBreath {
+  0%,
+  100% {
+    opacity: 0;
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  22% {
+    opacity: 0.27;
+  }
+
+  36% {
+    opacity: 0.67;
   }
 }
 
@@ -2762,6 +2754,8 @@
 :root[data-login-motion="paused"] .pf-login-orbit::after,
 :root[data-login-motion="paused"] .pf-login-orbit .pointer-glow,
 :root[data-login-motion="paused"] .pf-login-orbit .orbit,
+:root[data-login-motion="paused"] .pf-login-orbit .orbit-pulse,
+:root[data-login-motion="paused"] .pf-login-orbit .orbit-glow,
 :root[data-login-motion="paused"] .pf-login-orbit .auth-core::before,
 :root[data-login-motion="paused"] .pf-login-orbit .auth-core::after,
 :root[data-login-motion="paused"] .pf-login-mist .mesh-blob,
