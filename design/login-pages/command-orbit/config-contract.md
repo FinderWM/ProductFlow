@@ -19,15 +19,13 @@
 
 ```json
 {
-  "login_page_mode": "random",
-  "login_page_selected_template_id": "",
-  "login_page_enabled_template_ids": ["command-orbit", "fluid-mist", "image-lab"]
+  "login_page_mode": "random"
 }
 ```
 
-- `login_page_mode`: `random` 或 `selected`，默认 `random`。
-- `login_page_selected_template_id`: 仅在 `selected` 模式下生效。
-- `login_page_enabled_template_ids`: 随机模式只从启用模板中选择。
+- `login_page_mode`: `random`、`command-orbit`、`fluid-mist` 或 `image-lab`，默认 `random`。
+- `random` 从全部受支持的登录页模板中随机选择；模板 ID 表示固定使用对应模板。
+- 旧字段 `login_page_selected_template_id` 和 `login_page_enabled_template_ids` 仅用于历史配置迁移，不属于当前配置契约。
 - 公开接口需要返回已经解析后的实际模板，前端不再二次随机。
 
 ```json
@@ -140,14 +138,15 @@ GET /api/public/login-page-config
 - 登录页应配置 CSP；脚本、样式、图片和表单提交目标默认限制为同源。
 - 模板允许低频背景漂移和轨道心跳动画，以保留 `command-orbit` 的概念动势。
 - 空闲状态不得运行 JS 驱动的永久动画循环或其它高频持续合成动画。
-- 指针跟随动效只能在 `pointer: fine` 且非 `prefers-reduced-motion: reduce` 时启用，并且必须按 pointer 事件合并到单个 rAF。
+- 指针跟随动效只能在 `pointer: fine` 且非
+  `prefers-reduced-motion: reduce` 时启用，并且必须按 pointer 事件合并到单个 rAF。
 - 不允许每帧读取布局信息；长期 `will-change` 只允许在真实交互窗口内短暂启用。
 - 当前模板没有图片槽位；后续新增图片槽位时，图片 URL 只允许同源相对路径或后端签发的受控媒体路径。
 
 ## 兜底规则
 
 - 未配置模板时使用 `random` 模式。
-- `random` 没有可用模板时回退到 `command-orbit`。
-- `login_page_selected_template_id` 不存在或未启用时回退到 `command-orbit`。
+- `random` 从 `command-orbit`、`fluid-mist` 和 `image-lab` 中随机选择。
+- 迁移旧的 `selected` 模式时，旧模板 ID 无效则回退到 `command-orbit`。
 - 可配置字段缺失、空字符串或仅空白时使用 `default_value`。
 - 公开接口失败时，前端可直接渲染 `command-orbit` 默认内容。
