@@ -361,6 +361,7 @@
 
 .pf-login-orbit .auth-core {
   position: relative;
+  z-index: 1;
   isolation: isolate;
   min-height: 560px;
   overflow: hidden;
@@ -374,32 +375,18 @@
   transform: rotate(-7deg);
 }
 
-.pf-login-orbit .auth-core::before,
-.pf-login-orbit .auth-core::after {
+.pf-login-orbit .shell-electric-arc {
   position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  content: "";
-}
-
-.pf-login-orbit .auth-core::before {
-  opacity: 0.16;
-  background:
-    repeating-linear-gradient(0deg, transparent 0 7px, rgba(121, 214, 188, 0.16) 7px 8px, transparent 8px 15px),
-    linear-gradient(90deg, transparent, rgba(247, 239, 226, 0.12), transparent);
-  transform: translate3d(0, -100%, 0);
-  animation: authSignalSweep 4.8s steps(9, end) infinite;
-}
-
-.pf-login-orbit .auth-core::after {
-  opacity: 0;
-  background:
-    linear-gradient(96deg, transparent 0 16%, rgba(121, 214, 188, 0.5) 16.2% 19.4%, transparent 19.8% 56%),
-    linear-gradient(276deg, transparent 0 40%, rgba(237, 189, 99, 0.42) 40.2% 43.6%, transparent 44% 100%);
+  left: -56px;
+  top: -48px;
+  z-index: 0;
+  display: block;
+  width: calc(100% + 112px);
+  height: calc(100% + 118px);
+  contain: strict;
   mix-blend-mode: screen;
-  transform: translate3d(-18%, 0, 0) skewX(-9deg);
-  animation: authElectricJitter 6.4s var(--ease) infinite;
+  opacity: 0.94;
+  pointer-events: none;
 }
 
 .pf-login-orbit .auth-head,
@@ -770,58 +757,6 @@
 .pf-login-orbit .rail-chip-setkey {
   transform: translate3d(var(--setkey-chip-x), var(--setkey-chip-y), 0) rotate(var(--setkey-chip-tilt))
     scale(var(--setkey-chip-scale));
-}
-
-@keyframes authSignalSweep {
-  0%,
-  68%,
-  100% {
-    opacity: 0;
-    transform: translate3d(0, -100%, 0);
-  }
-
-  72% {
-    opacity: 0.18;
-  }
-
-  82% {
-    opacity: 0.1;
-    transform: translate3d(0, 22%, 0);
-  }
-
-  86% {
-    opacity: 0.2;
-    transform: translate3d(0, 118%, 0);
-  }
-}
-
-@keyframes authElectricJitter {
-  0%,
-  64%,
-  100% {
-    opacity: 0;
-    transform: translate3d(-18%, 0, 0) skewX(-9deg);
-  }
-
-  68% {
-    opacity: 0.6;
-    transform: translate3d(5%, -2%, 0) skewX(-12deg);
-  }
-
-  71% {
-    opacity: 0.18;
-    transform: translate3d(-4%, 1%, 0) skewX(-6deg);
-  }
-
-  75% {
-    opacity: 0.45;
-    transform: translate3d(12%, 0, 0) skewX(-10deg);
-  }
-
-  80% {
-    opacity: 0;
-    transform: translate3d(24%, 1%, 0) skewX(-8deg);
-  }
 }
 
 @keyframes orbitEnter {
@@ -2733,13 +2668,15 @@
 
 /* Pause ambient (infinite) animations while the login page is idle or the tab
    is hidden; `useLoginMotionLifecycle` toggles the root dataset on any input. */
+:root[data-login-motion="paused"] .pf-login-orbit .shell-electric-arc {
+  opacity: 0;
+}
+
 :root[data-login-motion="paused"] .pf-login-orbit::after,
 :root[data-login-motion="paused"] .pf-login-orbit .pointer-glow,
 :root[data-login-motion="paused"] .pf-login-orbit .orbit,
 :root[data-login-motion="paused"] .pf-login-orbit .orbit-pulse,
 :root[data-login-motion="paused"] .pf-login-orbit .orbit-glow,
-:root[data-login-motion="paused"] .pf-login-orbit .auth-core::before,
-:root[data-login-motion="paused"] .pf-login-orbit .auth-core::after,
 :root[data-login-motion="paused"] .pf-login-mist .mesh-blob,
 :root[data-login-motion="paused"] .pf-login-mist .sparkle-dot,
 :root[data-login-motion="paused"] .pf-login-lab::before,

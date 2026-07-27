@@ -276,6 +276,24 @@ rules learned from the 2026-07 GPU pass:
   keyframes) composes with a pointer-driven `::before` (box-shadow/filter/translate), verify the math: e.g. sparkle
   `::before` opacity is `calc(var(--spark-pointer-glow) / 0.26)` so parent peak opacity 1.0 × child ≤ 1 lands on the
   intended final opacity.
+- **Burst Canvas effects must not keep a resident rAF loop.** Use a timeout for the quiet interval, request animation
+  frames only during the short visible burst, and cancel both handles when `data-login-motion="paused"` appears or the
+  component unmounts. Clear the Canvas at the same boundary so a paused page cannot retain a stale frame. Command Orbit
+  uses this pattern for its `190–340ms` electric arc bursts with a `4–9s` quiet interval.
+- **Size Canvas buffers from rendered CSS geometry with a bounded DPR.** Observe the owning shell, read both shell and
+  Canvas rectangles in the resize callback, cap `window.devicePixelRatio` at `2`, assign the backing buffer, and restore
+  the logical-pixel transform after each resize:
+
+  ```typescript
+  const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
+  canvas.width = Math.round(canvasRect.width * pixelRatio);
+  canvas.height = Math.round(canvasRect.height * pixelRatio);
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  ```
+
+  An absolutely positioned `<canvas>` is a replaced element: do not rely on four-sided `inset` plus auto width/height
+  to stretch it. Give it explicit CSS `width` and `height` derived from the shell, then verify desktop/mobile buffer
+  dimensions, non-empty pixels during a burst, no horizontal overflow, and reduced-motion/idle cleanup.
 
 ### Common Mistake: `window.matchMedia` is not guaranteed in tests
 

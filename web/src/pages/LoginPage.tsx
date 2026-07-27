@@ -8,6 +8,17 @@ import { useLoginMotionLifecycle } from "../lib/loginMotion";
 import { quantizeWorkspacePointerCoordinate } from "../lib/workspaceMotion";
 import { useI18n } from "../lib/preferences";
 import type { LoginPageConfig, LoginPageTemplateId } from "../lib/types";
+import {
+  commandOrbitArcOpacity,
+  commandOrbitCanvasPixelRatio,
+  createCommandOrbitArcFrame,
+  renderCommandOrbitArcFrame,
+} from "./commandOrbitElectricArc";
+import type {
+  CommandOrbitArcFrame,
+  CommandOrbitArcStrength,
+  CommandOrbitArcViewport,
+} from "./commandOrbitElectricArc";
 import "./LoginPage.css";
 
 interface LoginPageProps {
@@ -53,6 +64,10 @@ const DEFAULT_LOGIN_PAGE_CONFIG: LoginPageConfig = {
   },
   assets: {},
 };
+
+function randomInteger(min: number, max: number) {
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
 
 const COMMAND_ORBIT_CARD_EFFECT: CommandOrbitPointerEffect = {
   xVar: "--auth-card-x",
@@ -238,6 +253,151 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
     "从灵感编排、图像会话到素材沉淀，Inspiration One 将创作链路收束成一座私有控制台。",
   );
   const pointerGlowRef = useRef<HTMLDivElement | null>(null);
+  const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = staticCanvasRef.current;
+    const shell = canvas?.parentElement;
+    if (!canvas || !shell || typeof window.matchMedia !== "function") {
+      return undefined;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return undefined;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return undefined;
+    }
+    const drawingContext: CanvasRenderingContext2D = context;
+
+    let timer = 0;
+    let animationFrame = 0;
+    let stopped = false;
+    let viewport: CommandOrbitArcViewport | null = null;
+    let activeFrame: CommandOrbitArcFrame | null = null;
+    let previousFrame: CommandOrbitArcFrame | null = null;
+    let strength: CommandOrbitArcStrength = "soft";
+    let burstStartedAt = 0;
+    let burstDuration = 0;
+    let nextShapeAt = 0;
+    let flicker = 1;
+
+    const clearCanvas = () => {
+      if (viewport) {
+        drawingContext.clearRect(0, 0, viewport.width, viewport.height);
+      }
+    };
+
+    const syncCanvasSize = () => {
+      const canvasRect = canvas.getBoundingClientRect();
+      const shellRect = shell.getBoundingClientRect();
+      if (canvasRect.width < 1 || canvasRect.height < 1) {
+        return false;
+      }
+
+      const pixelRatio = commandOrbitCanvasPixelRatio(window.devicePixelRatio);
+      const pixelWidth = Math.max(1, Math.round(canvasRect.width * pixelRatio));
+      const pixelHeight = Math.max(1, Math.round(canvasRect.height * pixelRatio));
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+      drawingContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      viewport = {
+        width: canvasRect.width,
+        height: canvasRect.height,
+        frameLeft: shellRect.left - canvasRect.left,
+        frameRight: shellRect.right - canvasRect.left,
+        frameBottom: shellRect.bottom - canvasRect.top,
+      };
+      activeFrame = null;
+      previousFrame = null;
+      clearCanvas();
+      return true;
+    };
+
+    const stopBurst = () => {
+      if (animationFrame !== 0) {
+        window.cancelAnimationFrame(animationFrame);
+        animationFrame = 0;
+      }
+      activeFrame = null;
+      previousFrame = null;
+      clearCanvas();
+    };
+
+    function scheduleBurst(minDelay: number, maxDelay: number) {
+      if (stopped || document.documentElement.dataset.loginMotion === "paused") {
+        return;
+      }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(runBurst, randomInteger(minDelay, maxDelay));
+    }
+
+    function drawBurst(now: number) {
+      if (stopped || document.documentElement.dataset.loginMotion === "paused" || !viewport) {
+        stopBurst();
+        return;
+      }
+
+      const elapsed = now - burstStartedAt;
+      if (elapsed >= burstDuration) {
+        stopBurst();
+        scheduleBurst(4000, 9000);
+        return;
+      }
+
+      if (!activeFrame || elapsed >= nextShapeAt) {
+        previousFrame = activeFrame;
+        activeFrame = createCommandOrbitArcFrame(viewport, strength);
+        nextShapeAt = elapsed + randomInteger(32, 48);
+        flicker = 0.74 + Math.random() * 0.26;
+      }
+
+      const opacity = commandOrbitArcOpacity(elapsed / burstDuration);
+      clearCanvas();
+      if (previousFrame) {
+        renderCommandOrbitArcFrame(drawingContext, previousFrame, opacity * 0.2, strength);
+      }
+      renderCommandOrbitArcFrame(drawingContext, activeFrame, opacity * flicker, strength);
+      animationFrame = window.requestAnimationFrame(drawBurst);
+    };
+
+    function runBurst() {
+      if (!syncCanvasSize()) {
+        scheduleBurst(500, 1000);
+        return;
+      }
+      strength = Math.random() > 0.86 ? "strong" : "soft";
+      burstDuration = strength === "strong" ? randomInteger(260, 340) : randomInteger(190, 280);
+      burstStartedAt = performance.now();
+      nextShapeAt = 0;
+      activeFrame = null;
+      previousFrame = null;
+      animationFrame = window.requestAnimationFrame(drawBurst);
+    }
+
+    const pauseObserver = new MutationObserver(() => {
+      window.clearTimeout(timer);
+      stopBurst();
+      if (!stopped && document.documentElement.dataset.loginMotion !== "paused") {
+        scheduleBurst(480, 1100);
+      }
+    });
+    pauseObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-login-motion"] });
+    const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(syncCanvasSize) : null;
+    resizeObserver?.observe(shell);
+    syncCanvasSize();
+    scheduleBurst(520, 1100);
+
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      stopBurst();
+      pauseObserver.disconnect();
+      resizeObserver?.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     const glow = pointerGlowRef.current;
@@ -316,6 +476,13 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
           onPointerMove={(event) => applyCommandOrbitPointerEffect(event, COMMAND_ORBIT_CARD_EFFECT)}
           onPointerLeave={(event) => clearCommandOrbitPointerEffect(event, COMMAND_ORBIT_CARD_EFFECT)}
         >
+          <canvas
+            className="shell-electric-arc"
+            width={1}
+            height={1}
+            aria-hidden="true"
+            ref={staticCanvasRef}
+          />
           <div className="auth-core">
             <div className="auth-head">
               <div className="access-row">
