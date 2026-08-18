@@ -276,12 +276,21 @@ rules learned from the 2026-07 GPU pass:
   keyframes) composes with a pointer-driven `::before` (box-shadow/filter/translate), verify the math: e.g. sparkle
   `::before` opacity is `calc(var(--spark-pointer-glow) / 0.26)` so parent peak opacity 1.0 × child ≤ 1 lands on the
   intended final opacity.
-- **Burst Canvas effects must not keep a resident rAF loop.** Use a timeout for the quiet interval, request animation
-  frames only during the short visible burst, and cancel both handles when `data-login-motion="paused"` appears or the
+- **Burst Canvas effects must not keep a resident rAF loop.** Trigger a finite burst from the owning visual clock, request
+  animation frames only during its visible window, and cancel the frame when `data-login-motion="paused"` appears or the
   component unmounts. Clear the Canvas at the same boundary so a paused page cannot retain a stale frame. Command Orbit
-  uses this pattern for its `190–340ms` electric arc bursts with a `4–9s` quiet interval.
-- **Size Canvas buffers from rendered CSS geometry with a bounded DPR.** Observe the owning shell, read both shell and
-  Canvas rectangles in the resize callback, cap `window.devicePixelRatio` at `2`, assign the backing buffer, and restore
+  treats `.orbit-pulse` as the clock: listen to `animationstart` and `animationiteration`, render only the first `52%` of
+  each `3200ms` heartbeat, and wait for the next heartbeat event after idle resume. Do not add an independent random
+  timeout when a Canvas effect must remain phase-aligned with a CSS animation.
+- **Command Orbit separates page energy from form scanning.** Keep `.page-electric-arcs` as a direct decorative child of
+  `.stage`, below headings and interactive surfaces. Each heartbeat may create `1–5` randomized long tracks across the
+  rendered stage. Keep `.auth-scanner` as a direct decorative child of `.auth-core`; its horizontal beam travels from top
+  to bottom across the form surface. Do not attach either effect to the lower shell or add a second energy/scanner frame.
+  Align the beam launch with the heartbeat main peak, then finish the sweep with one uninterrupted transform easing; do
+  not keyframe its travel or brightness against the heartbeat rebound peaks. The scanner is a CSS scan field plus moving
+  beam, not a fingerprint icon, and every decorative node remains `aria-hidden` and `pointer-events: none`.
+- **Size Canvas buffers from rendered CSS geometry with a bounded DPR.** Observe the owning stage, read the Canvas
+  rectangle in the resize callback, cap `window.devicePixelRatio` at `2`, assign the backing buffer, and restore
   the logical-pixel transform after each resize:
 
   ```typescript
@@ -292,7 +301,7 @@ rules learned from the 2026-07 GPU pass:
   ```
 
   An absolutely positioned `<canvas>` is a replaced element: do not rely on four-sided `inset` plus auto width/height
-  to stretch it. Give it explicit CSS `width` and `height` derived from the shell, then verify desktop/mobile buffer
+  to stretch it. Give it explicit CSS `width` and `height` derived from the stage, then verify desktop/mobile buffer
   dimensions, non-empty pixels during a burst, no horizontal overflow, and reduced-motion/idle cleanup.
 
 ### Common Mistake: `window.matchMedia` is not guaranteed in tests

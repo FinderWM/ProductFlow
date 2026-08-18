@@ -15,6 +15,7 @@ node_modules/
 *.egg-info/
 *.tsbuildinfo
 *.log
+*.log.*
 backend/.venv/
 backend/.coverage
 backend/htmlcov/

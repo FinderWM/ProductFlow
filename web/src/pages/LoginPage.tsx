@@ -9,9 +9,14 @@ import { quantizeWorkspacePointerCoordinate } from "../lib/workspaceMotion";
 import { useI18n } from "../lib/preferences";
 import type { LoginPageConfig, LoginPageTemplateId } from "../lib/types";
 import {
+  COMMAND_ORBIT_ARC_VISIBLE_RATIO,
+  COMMAND_ORBIT_HEARTBEAT_DELAY_MS,
+  COMMAND_ORBIT_HEARTBEAT_MS,
+  commandOrbitArcCount,
   commandOrbitArcOpacity,
   commandOrbitCanvasPixelRatio,
   createCommandOrbitArcFrame,
+  createCommandOrbitArcViewport,
   renderCommandOrbitArcFrame,
 } from "./commandOrbitElectricArc";
 import type {
@@ -52,6 +57,15 @@ interface CommandOrbitPointerEffect {
   y: number;
   tilt?: number;
   scale?: number;
+}
+
+interface CommandOrbitBurstArc {
+  activeFrame: CommandOrbitArcFrame | null;
+  flicker: number;
+  intensity: number;
+  previousFrame: CommandOrbitArcFrame | null;
+  strength: CommandOrbitArcStrength;
+  viewport: CommandOrbitArcViewport;
 }
 
 const DEFAULT_LOGIN_PAGE_CONFIG: LoginPageConfig = {
@@ -253,12 +267,14 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
     "从灵感编排、图像会话到素材沉淀，Inspiration One 将创作链路收束成一座私有控制台。",
   );
   const pointerGlowRef = useRef<HTMLDivElement | null>(null);
+  const orbitPulseRef = useRef<HTMLDivElement | null>(null);
   const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     const canvas = staticCanvasRef.current;
-    const shell = canvas?.parentElement;
-    if (!canvas || !shell || typeof window.matchMedia !== "function") {
+    const stage = canvas?.parentElement;
+    const orbitPulse = orbitPulseRef.current;
+    if (!canvas || !stage || !orbitPulse || typeof window.matchMedia !== "function") {
       return undefined;
     }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -270,27 +286,21 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
     }
     const drawingContext: CanvasRenderingContext2D = context;
 
-    let timer = 0;
     let animationFrame = 0;
     let stopped = false;
-    let viewport: CommandOrbitArcViewport | null = null;
-    let activeFrame: CommandOrbitArcFrame | null = null;
-    let previousFrame: CommandOrbitArcFrame | null = null;
-    let strength: CommandOrbitArcStrength = "soft";
+    let canvasSize: Pick<CommandOrbitArcViewport, "height" | "width"> | null = null;
+    let activeArcs: CommandOrbitBurstArc[] = [];
     let burstStartedAt = 0;
-    let burstDuration = 0;
     let nextShapeAt = 0;
-    let flicker = 1;
 
     const clearCanvas = () => {
-      if (viewport) {
-        drawingContext.clearRect(0, 0, viewport.width, viewport.height);
+      if (canvasSize) {
+        drawingContext.clearRect(0, 0, canvasSize.width, canvasSize.height);
       }
     };
 
     const syncCanvasSize = () => {
       const canvasRect = canvas.getBoundingClientRect();
-      const shellRect = shell.getBoundingClientRect();
       if (canvasRect.width < 1 || canvasRect.height < 1) {
         return false;
       }
@@ -303,15 +313,8 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
         canvas.height = pixelHeight;
       }
       drawingContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      viewport = {
-        width: canvasRect.width,
-        height: canvasRect.height,
-        frameLeft: shellRect.left - canvasRect.left,
-        frameRight: shellRect.right - canvasRect.left,
-        frameBottom: shellRect.bottom - canvasRect.top,
-      };
-      activeFrame = null;
-      previousFrame = null;
+      canvasSize = { width: canvasRect.width, height: canvasRect.height };
+      activeArcs = [];
       clearCanvas();
       return true;
     };
@@ -321,81 +324,105 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
         window.cancelAnimationFrame(animationFrame);
         animationFrame = 0;
       }
-      activeFrame = null;
-      previousFrame = null;
+      activeArcs = [];
       clearCanvas();
     };
 
-    function scheduleBurst(minDelay: number, maxDelay: number) {
-      if (stopped || document.documentElement.dataset.loginMotion === "paused") {
-        return;
-      }
-      window.clearTimeout(timer);
-      timer = window.setTimeout(runBurst, randomInteger(minDelay, maxDelay));
-    }
-
     function drawBurst(now: number) {
-      if (stopped || document.documentElement.dataset.loginMotion === "paused" || !viewport) {
+      if (stopped || document.documentElement.dataset.loginMotion === "paused" || !canvasSize) {
         stopBurst();
         return;
       }
 
       const elapsed = now - burstStartedAt;
-      if (elapsed >= burstDuration) {
+      const heartbeatProgress = elapsed / COMMAND_ORBIT_HEARTBEAT_MS;
+      if (heartbeatProgress >= COMMAND_ORBIT_ARC_VISIBLE_RATIO) {
         stopBurst();
-        scheduleBurst(4000, 9000);
         return;
       }
 
-      if (!activeFrame || elapsed >= nextShapeAt) {
-        previousFrame = activeFrame;
-        activeFrame = createCommandOrbitArcFrame(viewport, strength);
-        nextShapeAt = elapsed + randomInteger(32, 48);
-        flicker = 0.74 + Math.random() * 0.26;
+      if (activeArcs.some((arc) => !arc.activeFrame) || elapsed >= nextShapeAt) {
+        activeArcs = activeArcs.map((arc) => ({
+          ...arc,
+          previousFrame: arc.activeFrame,
+          activeFrame: createCommandOrbitArcFrame(arc.viewport, arc.strength),
+          flicker: 0.8 + Math.random() * 0.2,
+        }));
+        nextShapeAt = elapsed + randomInteger(68, 96);
       }
 
-      const opacity = commandOrbitArcOpacity(elapsed / burstDuration);
+      const opacity = commandOrbitArcOpacity(heartbeatProgress);
+      const flowProgress = Math.min(1, heartbeatProgress / COMMAND_ORBIT_ARC_VISIBLE_RATIO);
       clearCanvas();
-      if (previousFrame) {
-        renderCommandOrbitArcFrame(drawingContext, previousFrame, opacity * 0.2, strength);
-      }
-      renderCommandOrbitArcFrame(drawingContext, activeFrame, opacity * flicker, strength);
-      animationFrame = window.requestAnimationFrame(drawBurst);
-    };
-
-    function runBurst() {
-      if (!syncCanvasSize()) {
-        scheduleBurst(500, 1000);
-        return;
-      }
-      strength = Math.random() > 0.86 ? "strong" : "soft";
-      burstDuration = strength === "strong" ? randomInteger(260, 340) : randomInteger(190, 280);
-      burstStartedAt = performance.now();
-      nextShapeAt = 0;
-      activeFrame = null;
-      previousFrame = null;
+      activeArcs.forEach((arc) => {
+        const arcOpacity = opacity * arc.intensity;
+        if (arc.previousFrame) {
+          renderCommandOrbitArcFrame(
+            drawingContext,
+            arc.previousFrame,
+            arcOpacity * 0.16,
+            arc.strength,
+            flowProgress,
+          );
+        }
+        if (arc.activeFrame) {
+          renderCommandOrbitArcFrame(
+            drawingContext,
+            arc.activeFrame,
+            arcOpacity * arc.flicker,
+            arc.strength,
+            flowProgress,
+          );
+        }
+      });
       animationFrame = window.requestAnimationFrame(drawBurst);
     }
 
-    const pauseObserver = new MutationObserver(() => {
-      window.clearTimeout(timer);
+    function runBurst() {
+      if (!syncCanvasSize() || !canvasSize) {
+        return;
+      }
       stopBurst();
-      if (!stopped && document.documentElement.dataset.loginMotion !== "paused") {
-        scheduleBurst(480, 1100);
+      const currentCanvasSize = canvasSize;
+      const arcCount = commandOrbitArcCount();
+      activeArcs = Array.from({ length: arcCount }, (_, index): CommandOrbitBurstArc => ({
+        activeFrame: null,
+        flicker: 1,
+        intensity: index === 0 ? 1 : 0.62 + Math.random() * 0.3,
+        previousFrame: null,
+        strength: index === 0 || Math.random() > 0.64 ? "strong" : "soft",
+        viewport: createCommandOrbitArcViewport(currentCanvasSize.width, currentCanvasSize.height),
+      }));
+      burstStartedAt = performance.now();
+      nextShapeAt = 0;
+      animationFrame = window.requestAnimationFrame(drawBurst);
+    }
+
+    const handleHeartbeat = (event: AnimationEvent) => {
+      if (event.animationName === "orbitPulse" && document.documentElement.dataset.loginMotion !== "paused") {
+        runBurst();
+      }
+    };
+
+    const pauseObserver = new MutationObserver(() => {
+      if (document.documentElement.dataset.loginMotion === "paused") {
+        stopBurst();
       }
     });
     pauseObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-login-motion"] });
     const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(syncCanvasSize) : null;
-    resizeObserver?.observe(shell);
+    orbitPulse.addEventListener("animationstart", handleHeartbeat);
+    orbitPulse.addEventListener("animationiteration", handleHeartbeat);
+    resizeObserver?.observe(stage);
     syncCanvasSize();
-    scheduleBurst(520, 1100);
 
     return () => {
       stopped = true;
-      window.clearTimeout(timer);
       stopBurst();
       pauseObserver.disconnect();
       resizeObserver?.disconnect();
+      orbitPulse.removeEventListener("animationstart", handleHeartbeat);
+      orbitPulse.removeEventListener("animationiteration", handleHeartbeat);
     };
   }, []);
 
@@ -443,9 +470,18 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
   }, []);
 
   return (
-    <div className={`pf-login-orbit ${form.mode === "password" ? "is-setup" : "is-login"}`}>
+    <div
+      className={`pf-login-orbit ${form.mode === "password" ? "is-setup" : "is-login"}`}
+      style={
+        {
+          "--orbit-heartbeat-duration": `${COMMAND_ORBIT_HEARTBEAT_MS}ms`,
+          "--orbit-heartbeat-delay": `${COMMAND_ORBIT_HEARTBEAT_DELAY_MS}ms`,
+        } as CSSProperties
+      }
+    >
       <div className="pointer-glow" aria-hidden="true" ref={pointerGlowRef} />
       <main className="stage">
+        <canvas className="page-electric-arcs" width={1} height={1} aria-hidden="true" ref={staticCanvasRef} />
         <div className="brand">
           <div>
             <strong>Inspiration One</strong>
@@ -459,7 +495,7 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
           ORBIT
         </div>
         <div className="orbit" aria-hidden="true">
-          <div className="orbit-pulse">
+          <div className="orbit-pulse" ref={orbitPulseRef}>
             <div className="orbit-glow" />
           </div>
         </div>
@@ -476,14 +512,10 @@ function CommandOrbitLogin({ config, form }: { config: LoginPageConfig; form: Lo
           onPointerMove={(event) => applyCommandOrbitPointerEffect(event, COMMAND_ORBIT_CARD_EFFECT)}
           onPointerLeave={(event) => clearCommandOrbitPointerEffect(event, COMMAND_ORBIT_CARD_EFFECT)}
         >
-          <canvas
-            className="shell-electric-arc"
-            width={1}
-            height={1}
-            aria-hidden="true"
-            ref={staticCanvasRef}
-          />
           <div className="auth-core">
+            <div className="auth-scanner" aria-hidden="true">
+              <span className="auth-scanner-beam" />
+            </div>
             <div className="auth-head">
               <div className="access-row">
                 <span className="access-label">CORE ACCESS</span>

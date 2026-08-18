@@ -49,3 +49,36 @@ describe("LoginPage authenticated redirect", () => {
     expect(await screen.findByText("/resource-library")).toBeTruthy();
   });
 });
+
+describe("Command Orbit ambient effects", () => {
+  it("keeps page arcs outside the form and attaches the vertical scanner to the auth core", () => {
+    vi.spyOn(api, "getLoginPageConfig").mockImplementation(() => new Promise(() => undefined));
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/login"]}>
+          <LoginPage authenticated={false} authenticatedRedirectPath="/resource-library" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const stage = container.querySelector<HTMLElement>(".stage");
+    const shell = container.querySelector<HTMLElement>(".auth-shell");
+    const core = shell?.querySelector<HTMLElement>(":scope > .auth-core");
+    const form = core?.querySelector("form");
+    const scanner = core?.querySelector(":scope > .auth-scanner") ?? null;
+
+    expect(container.querySelector(".auth-energy-bed")).toBeNull();
+    expect(stage?.querySelector(":scope > .page-electric-arcs")?.getAttribute("aria-hidden")).toBe("true");
+    expect(shell?.querySelector(":scope > .shell-electric-arc")).toBeNull();
+    expect(scanner?.getAttribute("aria-hidden")).toBe("true");
+    expect(scanner?.querySelector("svg")).toBeNull();
+    expect(form).toBeTruthy();
+    expect(form?.contains(scanner)).toBe(false);
+  });
+});
